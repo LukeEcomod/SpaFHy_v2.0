@@ -243,7 +243,6 @@ def parameters(folder=''):
             'ditch_depth': 0.5,
             'ditch_spacing': 40.,
             'ditch_width': 1.0,
-            'depth_id': 4.0,
             'drain_ksat': 1E-5
             }
         

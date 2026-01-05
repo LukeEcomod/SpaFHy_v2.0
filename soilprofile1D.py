@@ -3,6 +3,10 @@
 Created on Fri Dec 21 12:58:54 2018
 
 @author: khaahti & jpnousu
+intended to use below bucketgrid.py
+meaning that organic layer and transpiration 
+stripped down from the original soilprofile1D.py
+of SpaFHy-Peat (Leppä et al., 2020)
 """
 import numpy as np
 eps = np.finfo(float).eps
