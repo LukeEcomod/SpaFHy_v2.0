@@ -55,6 +55,7 @@ class Topmodel_Homogenous():
         # importing other parameters
         dxy  = pp['dxy'] # grid size
         self.M = pp['m'] # effective soil depth [m]
+        self.M_ave = 0.025
         self.dt = float(pp['dt']) # timestep 
         self.To = pp['ko']*self.dt # transmissivity at saturation
 
@@ -63,6 +64,7 @@ class Topmodel_Homogenous():
         self.CatchmentArea = np.size(cmask[np.isfinite(cmask)])*self.CellArea
         self.qr = np.full_like(cmask, 0.0)
         
+        print(np.unique(self.M))
 
         """
         local and catchment average hydrologic similarity indices (xi=twi, X).
@@ -116,7 +118,7 @@ class Topmodel_Homogenous():
     
     def subsurfaceflow(self):
         """subsurface flow to stream network (per unit catchment area)"""
-        Qb = self.Qo*np.exp(-self.S / (self.M + eps))
+        Qb = self.Qo*np.exp(-self.S / (self.M_ave + eps))
         return Qb
 
     def run_timestep(self, R):

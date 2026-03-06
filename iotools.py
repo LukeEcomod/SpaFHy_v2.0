@@ -271,6 +271,11 @@ def read_top_gisdata(fpath, spatial_ptop, mask=None, plotgrids=False):
         if spatial_ptop['twi'] == True:                        
             twi, info, _, cellsize, _ = read_AsciiGrid(os.path.join(fpath, ptop['twi']))
             gis['twi'] = twi
+
+    if 'm' in spatial_ptop:
+        if spatial_ptop['m'] == True:                        
+            m, info, _, cellsize, _ = read_AsciiGrid(os.path.join(fpath, ptop['m']))
+            gis['m'] = m
     
     if plotgrids is True:
         plt.figure()
@@ -678,6 +683,9 @@ def preprocess_topdata(ptop, spatial_ptop, gisdata, spatial=True):
     ptop['slope'] = gisdata['slope']
     ptop['flowacc'] = gisdata['flowacc']
     ptop['twi'] = gisdata['twi']
+    if 'm' in spatial_ptop:
+        if spatial_ptop['m'] == True:
+            ptop['m'] = gisdata['m']
     ptop['dxy'] = gisdata['dxy']
     if {'lat','lon'}.issubset(gisdata.keys()):
         ptop['loc']['lat'] = gisdata['lat']

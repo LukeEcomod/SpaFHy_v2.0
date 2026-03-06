@@ -10,7 +10,7 @@ import time
 def parameters(folder=''):
 
     pgen = {'description': 'final_run',  # description written in result file
-            'simtype': '2D', # groundwater conceptualizations: '1D', 'TOP' or '2D',
+            'simtype': 'TOP', # groundwater conceptualizations: '1D', 'TOP' or '2D',
             'start_date': '2018-01-01', # '2011-01-01', for tests: '2020-01-01'
             'end_date': '2019-12-31', # 2021-12-31,
             #'spinup_file': r'F:\SpaFHy_2D_2021/testcase_input_202304051037_spinup.nc',
@@ -252,9 +252,9 @@ def ptopmodel():
             'slope': 'slope.asc',
             'twi': 'twi_dinf.asc',
             'dt': 86400.0, # timestep (s)
-            'm': 0.025, # 0.025 calibrated by Samuli, scaling depth (m), testin 0.01
+            'm': 'm_test.asc', # 0.025 calibrated by Samuli, scaling depth (m), testin 0.01
             'ko': 0.001, # transmissivity parameter (ms-1)
-            'twi_cutoff': 97.5,  # cutoff of cumulative twi distribution (%)
+            'twi_cutoff': 95.5,  # cutoff of cumulative twi distribution (%)
             'so': 0.05 # initial saturation deficit (m)
            }
     return ptopmodel
