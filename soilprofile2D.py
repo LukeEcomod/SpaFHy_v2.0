@@ -225,24 +225,25 @@ class SoilGrid_2Dflow(object):
         strides = a.strides + (a.strides[-1],)
         return np.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
 
-    def run_timestep(self, dt=1.0, RR=0.0):
+    def run_timestep(self, dt=1.0, RR=0.0, max_substeps=8):
 
         """
-        Advances the 2D groundwater flow model by one timestep.
+        Advances the 2D groundwater flow model by one timestep with adaptive sub-stepping.
 
         Solves the implicit/Crank-Nicolson finite-difference system iteratively
-        until convergence (max head change < x m) or maxiter=y is reached.
-        Transmissivity is updated inside the iteration loop. Stream/lake cells
-        are treated as constant-head boundaries when the neighbouring water table
-        is above the ditch/lake water level.
+        until convergence (max head change < 1e-3 m) or maxiter=100 is reached.
+        If the head change between Picard iterations exceeds 0.5 m in any cell,
+        the sub-step is rejected, the state is restored, and the timestep is split
+        in two. This repeats until convergence or max_substeps is reached.
 
         Note:
             dt is in days. Transmissivity lookup tables are pre-converted to
             [m2 d-1] in gwl_Wsto / gwl_Wsto_vectorized.
 
         Args:
-            dt  (float): Timestep duration [days]. Default 1.0 (daily).
-            RR  (array): Drainage input from BucketGrid to the saturated zone [m].
+            dt           (float): Timestep duration [days]. Default 1.0 (daily).
+            RR           (array): Drainage input from BucketGrid to the saturated zone [m].
+            max_substeps (int):   Maximum number of sub-steps allowed. Default 8.
 
         Returns:
             dict with keys:
@@ -255,7 +256,6 @@ class SoilGrid_2Dflow(object):
                 'transmissivity'      [m2 d-1]: mean transmissivity of the grid
         """
 
-        
         #***********REMIND: map of array*******************
         #2D array: indices i row, j col
         #Flattened array: n from 0 to rows*cols: n=i*cols+j
@@ -263,396 +263,389 @@ class SoilGrid_2Dflow(object):
         #East element: n=i*cols+1
         #North element: n=i*cols+j-cols
         #South element: n=i*cols-j+cols
-    
+
         self.tmstep += 1
 
-        # for computing mass balance later, RR: drainage from bucketgrid
-        S = RR
-        S[np.isnan(S)] = 0.0
+        # Pre-process RR once; divide evenly across sub-steps inside the loop
+        S_full = RR.copy()
+        S_full[np.isnan(S_full)] = 0.0
 
-        state0 = self.Wsto_deep + S # [m]
+        # Save initial state so it can be restored on step rejection
+        H_init    = self.H.copy()
+        Wsto_init = self.Wsto_deep.copy()
+        gwl_init  = self.gwl.copy()
 
-        # Head in four neighbouring cells
-        self.HW[:,1:] = self.H[:,:-1]
-        self.HE[:,:-1] = self.H[:,1:]
-        self.HN[1:,:] = self.H[:-1,:]
-        self.HS[:-1,:] = self.H[1:,:]
-        
-        # ravel 2D arrays
-        HW = np.ravel(self.HW)
-        HE = np.ravel(self.HE)
-        HN = np.ravel(self.HN)
-        HS = np.ravel(self.HS)
-        H = np.ravel(self.H)
-        Wsto_deep = np.ravel(self.Wsto_deep)
-        ditch_h = np.ravel(self.ditch_h)
-        lake_h = np.ravel(self.lake_h)
-        lake_interior = np.ravel(self.lake_interior)
-        ele = np.ravel(self.ele)
+        n_sub = 1   # start with one sub-step; doubles on rejection
+        acc   = None
 
-        # Ditches
-        # calculate mean H of neighboring nodes to find out whether ditch is active (constant head)
-        # from previous timestep to avoid switching boundary/no-boundary during iteration
-        H_neighbours = ditch_h.copy()
-        for k in np.where(ditch_h < -eps)[0]:
-            H_ave = 0
-            n_neigh = 0
-            if k%self.cols != 0 and ditch_h[k-1] > -eps: # west non-ditch neighbor
-                    H_ave += H[k-1]
-                    n_neigh += 1
-            if (k+1)%self.cols != 0 and ditch_h[k+1] > -eps: # east non-ditch neighbor
-                    H_ave += H[k+1]
-                    n_neigh += 1
-            if k-self.cols >= 0 and  ditch_h[k-self.cols] > -eps: # north non-ditch neighbor
-                    H_ave += H[k-self.cols]
-                    n_neigh += 1
-            if k+self.cols < self.n and ditch_h[k+self.cols] > -eps: # south non-ditch neighbor
-                    H_ave += H[k+self.cols]
-                    n_neigh += 1
-            if n_neigh > 0:
-                H_neighbours[k] = H_ave / n_neigh  # average of neighboring non-ditch nodes
-            else:  # corners or nodes surrounded by ditches dont have neighbors, given its ditch depth
-                H_neighbours[k] = ele[k] + ditch_h[k] + eps
+        while True:
+            dt_sub = dt / n_sub
+            S = S_full / n_sub
 
-        # lake interior do not have neighbours
-        for k in np.where(lake_interior == 1)[0]:
-            H_neighbours[k] = ele[k] + lake_h[k] + eps
-        
-        H_neighbours_2d = np.reshape(H_neighbours,(self.rows,self.cols)) # 2D array of stream/ditch neighbouring land cells' average hydraulic head
+            # Restore initial state for a fresh attempt with current n_sub
+            self.H         = H_init.copy()
+            self.Wsto_deep = Wsto_init.copy()
+            self.gwl       = gwl_init.copy()
 
-        # Transmissivity of previous timestep [m2 d-1]
-        # for ditch nodes that are active, transmissivity calculated based on mean H of
-        # neighboring nodes, not ditch depth which would restrict tranmissivity too much
-        # Whole profile depth still considered, but I think that is the usual way..
-        H_for_Tr = np.where((self.ditch_h < -eps) & (H_neighbours_2d > self.ele + self.ditch_h),
-                            H_neighbours_2d, self.H)
-        
-        # transmissivities based on gwl
-        if not self.z_from_gis:
-            for key, value in self.gwl_to_Tr.items():
-                self.Tr0[self.soiltype == key] = value(H_for_Tr[self.soiltype == key] - self.ele[self.soiltype == key])
-        elif self.z_from_gis:
-            for i in range(self.gwl_to_Tr.shape[0]):
-                for j in range(self.gwl_to_Tr.shape[1]):
-                    if np.isfinite(self.cmask[i,j]): 
-                        self.Tr0[i,j] = self.gwl_to_Tr[i,j](H_for_Tr[i,j] - self.ele[i,j])
+            rejected = False
+            acc      = None
 
-        # transmissivity at all four sides of the element is computed as geometric mean of surrounding element transimissivities
-        # is this actually at all four sides, or just along east-west and north-sound axes?
-        TrTmpEW = gmean(self.rolling_window(self.Tr0, 2), -1)
-        TrTmpNS = np.transpose(gmean(self.rolling_window(np.transpose(self.Tr0), 2), -1))
-        self.TrW0[:,1:] = TrTmpEW
-        self.TrE0[:,:-1] = TrTmpEW
-        self.TrN0[1:,:] = TrTmpNS
-        self.TrS0[:-1,:] = TrTmpNS
-        del TrTmpEW, TrTmpNS
+            for i_sub in range(n_sub):
 
-        # Head in four neighbouring cells
-        self.HW[:,1:] = self.H[:,:-1]
-        self.HE[:,:-1] = self.H[:,1:]
-        self.HN[1:,:] = self.H[:-1,:]
-        self.HS[:-1,:] = self.H[1:,:]
+                state0 = self.Wsto_deep + S # [m]
 
-        # ravel 2D arrays
-        # to avoid reshaping, save in other variable
-        TrW0 = np.ravel(self.TrW0)
-        TrE0 = np.ravel(self.TrE0)
-        TrN0 = np.ravel(self.TrN0)
-        TrS0 = np.ravel(self.TrS0)
+                # Head in four neighbouring cells
+                self.HW[:,1:] = self.H[:,:-1]
+                self.HE[:,:-1] = self.H[:,1:]
+                self.HN[1:,:] = self.H[:-1,:]
+                self.HS[:-1,:] = self.H[1:,:]
 
-        # from previous timestep
-        TrW1 = TrW0.copy()
-        TrE1 = TrE0.copy()
-        TrN1 = TrN0.copy()
-        TrS1 = TrS0.copy()
+                # ravel 2D arrays
+                HW = np.ravel(self.HW)
+                HE = np.ravel(self.HE)
+                HN = np.ravel(self.HN)
+                HS = np.ravel(self.HS)
+                H = np.ravel(self.H)
+                Wsto_deep = np.ravel(self.Wsto_deep)
+                ditch_h = np.ravel(self.ditch_h)
+                lake_h = np.ravel(self.lake_h)
+                lake_interior = np.ravel(self.lake_interior)
+                ele = np.ravel(self.ele)
 
-        # hydraulic heads, new iteration and old iteration
-        Htmp = self.H.copy()
-        Htmp1 = self.H.copy()
+                # Ditches
+                # calculate mean H of neighboring nodes to find out whether ditch is active (constant head)
+                # from previous timestep to avoid switching boundary/no-boundary during iteration
+                H_neighbours = ditch_h.copy()
+                for k in np.where(ditch_h < -eps)[0]:
+                    H_ave = 0
+                    n_neigh = 0
+                    if k%self.cols != 0 and ditch_h[k-1] > -eps: # west non-ditch neighbor
+                            H_ave += H[k-1]
+                            n_neigh += 1
+                    if (k+1)%self.cols != 0 and ditch_h[k+1] > -eps: # east non-ditch neighbor
+                            H_ave += H[k+1]
+                            n_neigh += 1
+                    if k-self.cols >= 0 and  ditch_h[k-self.cols] > -eps: # north non-ditch neighbor
+                            H_ave += H[k-self.cols]
+                            n_neigh += 1
+                    if k+self.cols < self.n and ditch_h[k+self.cols] > -eps: # south non-ditch neighbor
+                            H_ave += H[k+self.cols]
+                            n_neigh += 1
+                    if n_neigh > 0:
+                        H_neighbours[k] = H_ave / n_neigh  # average of neighboring non-ditch nodes
+                    else:  # corners or nodes surrounded by ditches dont have neighbors, given its ditch depth
+                        H_neighbours[k] = ele[k] + ditch_h[k] + eps
 
-        # convergence criteria
-        crit = 1e-3  # seems mass balance error remains resonable
-        maxiter = 100
-        update_Tr_in_loop = True
+                # lake interior do not have neighbours
+                for k in np.where(lake_interior == 1)[0]:
+                    H_neighbours[k] = ele[k] + lake_h[k] + eps
 
-        for it in range(maxiter):
-            if update_Tr_in_loop:
-                # transmissivity [m2 d-1] to neighbouring cells with HTmp1
+                H_neighbours_2d = np.reshape(H_neighbours,(self.rows,self.cols)) # 2D array of stream/ditch neighbouring land cells' average hydraulic head
+
+                # Transmissivity of previous timestep [m2 d-1]
                 # for ditch nodes that are active, transmissivity calculated based on mean H of
-                # neighboring nodes, not ditch depth which would restrict transmissivity too much
+                # neighboring nodes, not ditch depth which would restrict tranmissivity too much
+                # Whole profile depth still considered, but I think that is the usual way..
                 H_for_Tr = np.where((self.ditch_h < -eps) & (H_neighbours_2d > self.ele + self.ditch_h),
-                                    H_neighbours_2d, Htmp)
+                                    H_neighbours_2d, self.H)
+
                 # transmissivities based on gwl
                 if not self.z_from_gis:
                     for key, value in self.gwl_to_Tr.items():
-                        self.Tr1[self.soiltype == key] = value(H_for_Tr[self.soiltype == key] - self.ele[self.soiltype == key])
+                        self.Tr0[self.soiltype == key] = value(H_for_Tr[self.soiltype == key] - self.ele[self.soiltype == key])
                 elif self.z_from_gis:
                     for i in range(self.gwl_to_Tr.shape[0]):
                         for j in range(self.gwl_to_Tr.shape[1]):
-                            if np.isfinite(self.cmask[i,j]): 
-                                self.Tr1[i,j] = self.gwl_to_Tr[i,j](H_for_Tr[i,j] - self.ele[i,j])            
-                
-                TrTmpEW = gmean(self.rolling_window(self.Tr1, 2),-1)
-                TrTmpNS = np.transpose(gmean(self.rolling_window(np.transpose(self.Tr1), 2),-1))
-                self.TrW1[:,1:] = TrTmpEW
-                self.TrE1[:,:-1] = TrTmpEW
-                self.TrN1[1:,:] = TrTmpNS
-                self.TrS1[:-1,:]=TrTmpNS
+                            if np.isfinite(self.cmask[i,j]):
+                                self.Tr0[i,j] = self.gwl_to_Tr[i,j](H_for_Tr[i,j] - self.ele[i,j])
+
+                # transmissivity at all four sides of the element is computed as geometric mean of surrounding element transimissivities
+                # is this actually at all four sides, or just along east-west and north-sound axes?
+                TrTmpEW = gmean(self.rolling_window(self.Tr0, 2), -1)
+                TrTmpNS = np.transpose(gmean(self.rolling_window(np.transpose(self.Tr0), 2), -1))
+                self.TrW0[:,1:] = TrTmpEW
+                self.TrE0[:,:-1] = TrTmpEW
+                self.TrN0[1:,:] = TrTmpNS
+                self.TrS0[:-1,:] = TrTmpNS
                 del TrTmpEW, TrTmpNS
+
+                # Head in four neighbouring cells
+                self.HW[:,1:] = self.H[:,:-1]
+                self.HE[:,:-1] = self.H[:,1:]
+                self.HN[1:,:] = self.H[:-1,:]
+                self.HS[:-1,:] = self.H[1:,:]
+
                 # ravel 2D arrays
-                TrW1 = np.ravel(self.TrW1); TrE1= np.ravel(self.TrE1)
-                TrN1 = np.ravel(self.TrN1); TrS1 = np.ravel(self.TrS1)
-            else:
+                # to avoid reshaping, save in other variable
+                TrW0 = np.ravel(self.TrW0)
+                TrE0 = np.ravel(self.TrE0)
+                TrN0 = np.ravel(self.TrN0)
+                TrS0 = np.ravel(self.TrS0)
+
                 # from previous timestep
                 TrW1 = TrW0.copy()
                 TrE1 = TrE0.copy()
                 TrN1 = TrN0.copy()
                 TrS1 = TrS0.copy()
 
-            # differential water capacity dSto/dh
-            if not self.z_from_gis:
-                for key, value in self.gwl_to_C.items():
-                    self.CC[self.soiltype == key] = value(Htmp[self.soiltype == key] - self.ele[self.soiltype == key])
-                for key, value in self.gwl_to_wsto.items():
-                    self.Wtso1_deep[self.soiltype == key] = value(Htmp[self.soiltype == key] - self.ele[self.soiltype == key])
-            elif self.z_from_gis:
-                for i in range(self.gwl_to_C.shape[0]):
-                    for j in range(self.gwl_to_C.shape[1]):
-                        if np.isfinite(self.cmask[i,j]): 
-                            self.CC[i,j] = self.gwl_to_C[i,j](Htmp[i,j] - self.ele[i,j])
-                            self.Wtso1_deep[i,j] = self.gwl_to_wsto[i,j](Htmp[i,j] - self.ele[i,j])
+                # hydraulic heads, new iteration and old iteration
+                Htmp = self.H.copy()
+                Htmp1 = self.H.copy()
 
-            alfa = np.ravel(self.CC * self.dxy**2 / dt)
-            # alfa = np.ravel((0.5*self.CC + 0.5*CCtmp) * self.dxy**2 / dt)
+                # convergence criteria
+                crit = 1e-3  # seems mass balance error remains resonable
+                maxiter = 100
+                update_Tr_in_loop = True
 
-            # Setup of diagonal sparse matrix
-            a_d = self.implic * (TrW1 + TrE1 + TrN1 + TrS1) + alfa  # Diagonal
-            a_w = -self.implic * TrW1[1:]  # West element
-            a_e = -self.implic * TrE1[:-1]  # East element
-            a_n = -self.implic * TrN1[self.cols:]  # North element
-            a_s = -self.implic * TrS1[:self.n-self.cols]  # South element
+                for it in range(maxiter):
+                    if update_Tr_in_loop:
+                        # transmissivity [m2 d-1] to neighbouring cells with HTmp1
+                        # for ditch nodes that are active, transmissivity calculated based on mean H of
+                        # neighboring nodes, not ditch depth which would restrict transmissivity too much
+                        H_for_Tr = np.where((self.ditch_h < -eps) & (H_neighbours_2d > self.ele + self.ditch_h),
+                                            H_neighbours_2d, Htmp)
+                        # transmissivities based on gwl
+                        if not self.z_from_gis:
+                            for key, value in self.gwl_to_Tr.items():
+                                self.Tr1[self.soiltype == key] = value(H_for_Tr[self.soiltype == key] - self.ele[self.soiltype == key])
+                        elif self.z_from_gis:
+                            for i in range(self.gwl_to_Tr.shape[0]):
+                                for j in range(self.gwl_to_Tr.shape[1]):
+                                    if np.isfinite(self.cmask[i,j]):
+                                        self.Tr1[i,j] = self.gwl_to_Tr[i,j](H_for_Tr[i,j] - self.ele[i,j])
 
-            # Knowns: Right hand side of the eq
-            Htmp = np.ravel(Htmp)
-            hs = (np.ravel(S) * self.dxy**2 / dt + alfa * Htmp
-                   - np.ravel(self.Wtso1_deep) * self.dxy**2 / dt + Wsto_deep * self.dxy**2 / dt
-                  + (1.-self.implic) * (TrN0*HN) + (1.-self.implic) * (TrW0*HW)
-                  - (1.-self.implic) * (TrN0 + TrW0 + TrE0 + TrS0) * H
-                  + (1.-self.implic) * (TrE0*HE) + (1.-self.implic) * (TrS0*HS))
+                        TrTmpEW = gmean(self.rolling_window(self.Tr1, 2),-1)
+                        TrTmpNS = np.transpose(gmean(self.rolling_window(np.transpose(self.Tr1), 2),-1))
+                        self.TrW1[:,1:] = TrTmpEW
+                        self.TrE1[:,:-1] = TrTmpEW
+                        self.TrN1[1:,:] = TrTmpNS
+                        self.TrS1[:-1,:]=TrTmpNS
+                        del TrTmpEW, TrTmpNS
+                        # ravel 2D arrays
+                        TrW1 = np.ravel(self.TrW1); TrE1= np.ravel(self.TrE1)
+                        TrN1 = np.ravel(self.TrN1); TrS1 = np.ravel(self.TrS1)
+                    else:
+                        # from previous timestep
+                        TrW1 = TrW0.copy()
+                        TrE1 = TrE0.copy()
+                        TrN1 = TrN0.copy()
+                        TrS1 = TrS0.copy()
 
-            # Ditches
-            for k in np.where(ditch_h < -eps)[0]:
-                # update a_x and hs when ditch as constant head
-                if H_neighbours[k] > ele[k] + ditch_h[k]: # average of neighboring H above ditch depth
-                    hs[k] = ele[k] + ditch_h[k]
-                    a_d[k] = 1
-                    if k%self.cols != 0:  # west node
-                        a_w[k-1] = 0
-                    if (k+1)%self.cols != 0:  # east node
-                        a_e[k] = 0
-                    if k-self.cols >= 0:  # north node
-                        a_n[k-self.cols] = 0
-                    if k+self.cols < self.n:  # south node
-                        a_s[k] = 0
+                    # differential water capacity dSto/dh
+                    if not self.z_from_gis:
+                        for key, value in self.gwl_to_C.items():
+                            self.CC[self.soiltype == key] = value(Htmp[self.soiltype == key] - self.ele[self.soiltype == key])
+                        for key, value in self.gwl_to_wsto.items():
+                            self.Wtso1_deep[self.soiltype == key] = value(Htmp[self.soiltype == key] - self.ele[self.soiltype == key])
+                    elif self.z_from_gis:
+                        for i in range(self.gwl_to_C.shape[0]):
+                            for j in range(self.gwl_to_C.shape[1]):
+                                if np.isfinite(self.cmask[i,j]):
+                                    self.CC[i,j] = self.gwl_to_C[i,j](Htmp[i,j] - self.ele[i,j])
+                                    self.Wtso1_deep[i,j] = self.gwl_to_wsto[i,j](Htmp[i,j] - self.ele[i,j])
 
-            A = diags([a_d, a_w, a_e, a_n, a_s], [0, -1, 1, -self.cols, self.cols],format='csc')
+                    alfa = np.ravel(self.CC * self.dxy**2 / dt_sub)
 
-            # Solve: A*Htmp1 = hs
-            Htmp1 = linalg.spsolve(A,hs)
+                    # Setup of diagonal sparse matrix
+                    a_d = self.implic * (TrW1 + TrE1 + TrN1 + TrS1) + alfa  # Diagonal
+                    a_w = -self.implic * TrW1[1:]  # West element
+                    a_e = -self.implic * TrE1[:-1]  # East element
+                    a_n = -self.implic * TrN1[self.cols:]  # North element
+                    a_s = -self.implic * TrS1[:self.n-self.cols]  # South element
 
-            #Htmp1 = np.fmax(self.bedrock_h, Htmp1) # limit to bedrock
+                    # Knowns: Right hand side of the eq
+                    Htmp = np.ravel(Htmp)
+                    hs = (np.ravel(S) * self.dxy**2 / dt_sub + alfa * Htmp
+                           - np.ravel(self.Wtso1_deep) * self.dxy**2 / dt_sub + Wsto_deep * self.dxy**2 / dt_sub
+                          + (1.-self.implic) * (TrN0*HN) + (1.-self.implic) * (TrW0*HW)
+                          - (1.-self.implic) * (TrN0 + TrW0 + TrE0 + TrS0) * H
+                          + (1.-self.implic) * (TrE0*HE) + (1.-self.implic) * (TrS0*HS))
 
-            # testing, limit change
-            #if np.any(np.abs(Htmp1-Htmp)) > 0.5:
-                #print('Difference greater than 0.5')
+                    # Ditches
+                    for k in np.where(ditch_h < -eps)[0]:
+                        # update a_x and hs when ditch as constant head
+                        if H_neighbours[k] > ele[k] + ditch_h[k]: # average of neighboring H above ditch depth
+                            hs[k] = ele[k] + ditch_h[k]
+                            a_d[k] = 1
+                            if k%self.cols != 0:  # west node
+                                a_w[k-1] = 0
+                            if (k+1)%self.cols != 0:  # east node
+                                a_e[k] = 0
+                            if k-self.cols >= 0:  # north node
+                                a_n[k-self.cols] = 0
+                            if k+self.cols < self.n:  # south node
+                                a_s[k] = 0
 
-            max_index_print = np.unravel_index(np.argmax(np.abs(Htmp1 - Htmp)),(self.rows,self.cols))
-            Htmp_print = np.reshape(Htmp,(self.rows,self.cols))
-            Htmp1_print = np.reshape(Htmp1,(self.rows,self.cols))
-            
-            #print('\t', 'iterations:', it,
-            #        ' max_index:', max_index_print,
-            #        ' H[max_index]', Htmp_print[max_index_print]-self.ele[max_index_print], 
-            #        ' H1[max_index]', Htmp1_print[max_index_print]-self.ele[max_index_print])
+                    A = diags([a_d, a_w, a_e, a_n, a_s], [0, -1, 1, -self.cols, self.cols],format='csc')
 
+                    # Solve: A*Htmp1 = hs
+                    Htmp1 = linalg.spsolve(A,hs)
 
-            Htmp1 = np.where(np.abs(Htmp1-Htmp)> 0.5, Htmp + 0.5*np.sign(Htmp1-Htmp), Htmp1)
+                    #Htmp1 = np.fmax(self.bedrock_h, Htmp1) # limit to bedrock
 
-            conv1 = np.max(np.abs(Htmp1 - Htmp))
-                      
-            max_index = np.unravel_index(np.argmax(np.abs(Htmp1 - Htmp)),(self.rows,self.cols))
+                    # Step rejection: head change > 0.5 m in non-boundary cells means sub-step is too large.
+                    # Ditch and lake interior cells are excluded: their head is forced by the boundary
+                    # condition (constant-head), so the change reflects the BC, not numerical instability.
+                    is_bc = np.ravel((self.ditch_h < -eps) | (self.lake_interior == 1))
+                    if self.tmstep > 10 and np.any(np.abs(Htmp1[~is_bc] - Htmp[~is_bc]) > 0.5):
+                        rejected = True
+                        break
 
-            # especially near profile bottom, solution oscillates so added these steps to avoid that
-            if it > 40:
-                Htmp = 0.25*Htmp1+0.75*Htmp
-            elif it > 20:
-                Htmp = 0.5*Htmp1+0.5*Htmp
-            else:
-                Htmp = Htmp1.copy()
+                    # During spin-up (first 10 timesteps), clamp large head changes instead of rejecting
+                    if self.tmstep <= 10 and it > 20:
+                        Htmp1 = np.where(np.abs(Htmp1 - Htmp) > 0.5, Htmp + 0.5 * np.sign(Htmp1 - Htmp), Htmp1)
 
-            if np.any(np.abs(Htmp1-Htmp)) > 0.5:
-                Htmp_print = np.reshape(Htmp,(self.rows,self.cols))
-                Htmp1_print = np.reshape(Htmp1,(self.rows,self.cols))
-                print('Difference greater than 0.5')
-                print('\t', 'iterations:', it, ' con1:', conv1, 
-                      ' max_index:', max_index, ' self.ditch_h[max_index]', self.ditch_h[max_index],
-                      ' H[max_index]', Htmp_print[max_index]-self.ele[max_index], 
-                      ' H1[max_index]', Htmp1_print[max_index]-self.ele[max_index])
+                    conv1 = np.max(np.abs(Htmp1 - Htmp))
+                    max_index = np.unravel_index(np.argmax(np.abs(Htmp1 - Htmp)),(self.rows,self.cols))
 
-            Htmp = np.reshape(Htmp,(self.rows,self.cols))
+                    Htmp = Htmp1.copy()
 
-            # print to get sense what's happening when problems in convergence
-            if it > 90:
-                print('\t', 'iterations:', it, ' con1:', conv1, 
-                      ' max_index:', max_index, ' self.ditch_h[max_index]', self.ditch_h[max_index],
-                      ' H[max_index]', Htmp[max_index]-self.ele[max_index])
-                
-                Htmp_N_temp = Htmp[(max_index[0]-1, max_index[1])]
-                Htmp_S_temp = Htmp[(max_index[0]+1, max_index[1])]
-                Htmp_W_temp = Htmp[(max_index[0], max_index[1]-1)]
-                Htmp_E_temp = Htmp[(max_index[0], max_index[1]+1)]
+                    Htmp = np.reshape(Htmp,(self.rows,self.cols))
 
-                H_N_temp = Htmp[(max_index[0]-1, max_index[1])] - self.ele[(max_index[0]-1, max_index[1])]
-                H_S_temp = Htmp[(max_index[0]+1, max_index[1])] - self.ele[(max_index[0]+1, max_index[1])]
-                H_W_temp = Htmp[(max_index[0], max_index[1]-1)] - self.ele[(max_index[0], max_index[1]-1)]
-                H_E_temp = Htmp[(max_index[0], max_index[1]+1)] - self.ele[(max_index[0], max_index[1]+1)]
+                    if conv1 < crit:
+                        break
+                    # end of iteration loop
 
-                TrN1_temp = np.reshape(TrN1,(self.rows,self.cols))[(max_index[0]-1, max_index[1])]
-                TrS1_temp = np.reshape(TrS1,(self.rows,self.cols))[(max_index[0]+1, max_index[1])]
-                TrW1_temp = np.reshape(TrW1,(self.rows,self.cols))[(max_index[0], max_index[1]-1)]
-                TrE1_temp = np.reshape(TrE1,(self.rows,self.cols))[(max_index[0], max_index[1]+1)]
+                if rejected:
+                    break  # abandon remaining sub-steps; retry with smaller dt_sub
 
-                #print('Max Htmp1-Htmp', np.max(np.abs(Htmp1-Htmp)))
-                print('Htmp of max_index:', Htmp[max_index])
-                print('Htmp of N neighbor:', Htmp_N_temp)
-                print('Htmp of S neighbor:', Htmp_S_temp)
-                print('Htmp of W neighbor:', Htmp_W_temp)
-                print('Htmp of E neighbor:', Htmp_E_temp)
+                if it == 99:
+                    self.conv99 +=1
+                #self.totit += it
+                Htmp = np.reshape(Htmp,(self.rows,self.cols))
 
-                print('H of max_index:', Htmp[max_index] - self.ele[max_index])
-                print('H of N neighbor:', H_N_temp)
-                print('H of S neighbor:', H_S_temp)
-                print('H of W neighbor:', H_W_temp)
-                print('H of E neighbor:', H_E_temp)                
+                print(f'Timestep: {self.tmstep}, sub-step: {i_sub+1}/{n_sub}, iterations: {it}, conv1: {conv1:.2e}')
 
-                print('Tr of N neighbor:', TrN1_temp)
-                print('Tr of S neighbor:', TrS1_temp)
-                print('Tr of W neighbor:', TrW1_temp)
-                print('Tr of E neighbor:', TrE1_temp)
+                # lateral flow [m d-1] is calculated in two parts: one depending on previous time step
+                # and other on current time step (lateral flowsee 2/2). Their weighting depends
+                # on self.implic
+                # lateral flow 1/2 with old heads (and old transmissivities if updated inside the loop)
+                # use 1-self.implic
+                lateral_flow = ((1-self.implic)*(self.TrW0*(self.H - self.HW)
+                                + self.TrE0*(self.H - self.HE)
+                                + self.TrN0*(self.H - self.HN)
+                                + self.TrS0*(self.H - self.HS)))/ self.dxy**2
 
-            if conv1 < crit:
-                break
-            # end of iteration loop
-        if it == 99:
-            self.conv99 +=1
-        #self.totit += it
-        Htmp = np.reshape(Htmp,(self.rows,self.cols))
+                """ update state """
+                # soil profile
+                self.H = Htmp.copy()
+                self.gwl = self.H - self.ele
 
-        print('Timestep:', self.tmstep, ', iterations:', it, ', conv1:', conv1, ', H[max_index]:', Htmp[max_index]-self.ele[max_index])
-        
-        # lateral flow [m d-1] is calculated in two parts: one depending on previous time step
-        # and other on current time step (lateral flowsee 2/2). Their weighting depends
-        # on self.implic
-        # lateral flow 1/2 with old heads (and old transmissivities if updated inside the loop)
-        # use 1-self.implic
-        lateral_flow = ((1-self.implic)*(self.TrW0*(self.H - self.HW)
-                        + self.TrE0*(self.H - self.HE)
-                        + self.TrN0*(self.H - self.HN)
-                        + self.TrS0*(self.H - self.HS)))/ self.dxy**2
+                # water storages according to new gwl
+                if not self.z_from_gis:
+                    for key, value in self.gwl_to_wsto.items():
+                        self.Wsto_deep[self.soiltype == key] = value(self.gwl[self.soiltype == key])
+                elif self.z_from_gis:
+                    for i in range(self.gwl_to_wsto.shape[0]):
+                        for j in range(self.gwl_to_wsto.shape[1]):
+                            if np.isfinite(self.cmask[i,j]):
+                                self.Wsto_deep[i,j] = self.gwl_to_wsto[i,j](self.gwl[i,j])
 
-        """ update state """
-        # soil profile
-        self.H = Htmp.copy()
-        self.gwl = self.H - self.ele
+                # Head in four neighbouring cells
+                self.HW[:,1:] = self.H[:,:-1]
+                self.HE[:,:-1] = self.H[:,1:]
+                self.HN[1:,:] = self.H[:-1,:]
+                self.HS[:-1,:] = self.H[1:,:]
 
-        # water storages according to new gwl
-        if not self.z_from_gis:
-            for key, value in self.gwl_to_wsto.items():
-                self.Wsto_deep[self.soiltype == key] = value(self.gwl[self.soiltype == key])
-        elif self.z_from_gis:
-            for i in range(self.gwl_to_wsto.shape[0]):
-                for j in range(self.gwl_to_wsto.shape[1]):
-                    if np.isfinite(self.cmask[i,j]):
-                        self.Wsto_deep[i,j] = self.gwl_to_wsto[i,j](self.gwl[i,j])
+                # lateral flow 2/2 [m d-1] with new heads (and new transmissivities if updated inside the loop)
+                # use self.implic here
+                lateral_flow += (self.implic*(self.TrW1*(self.H - self.HW)
+                                + self.TrE1*(self.H - self.HE)
+                                + self.TrN1*(self.H - self.HN)
+                                + self.TrS1*(self.H - self.HS)))/ self.dxy**2
 
-        # Head in four neighbouring cells
-        self.HW[:,1:] = self.H[:,:-1]
-        self.HE[:,:-1] = self.H[:,1:]
-        self.HN[1:,:] = self.H[:-1,:]
-        self.HS[:-1,:] = self.H[1:,:]
+                Tr = np.nanmean([self.TrW1, self.TrE1, self.TrN1, self.TrS1], axis=0)
+                Tr = np.reshape(Tr,(self.rows,self.cols))
 
-        # lateral flow 2/2 [m d-1] with new heads (and new transmissivities if updated inside the loop)
-        # use self.implic here
-        lateral_flow += (self.implic*(self.TrW1*(self.H - self.HW)
-                        + self.TrE1*(self.H - self.HE)
-                        + self.TrN1*(self.H - self.HN)
-                        + self.TrS1*(self.H - self.HS)))/ self.dxy**2
-        
-        Tr = np.nanmean([self.TrW1, self.TrE1, self.TrN1, self.TrS1], axis=0)
-        Tr = np.reshape(Tr,(self.rows,self.cols))
+                # new update state
+                # state0 = water storage at timestep0 (including bucket drainage at timestep0)
+                # Wsto_deep = water storage at timestep1
+                # lateral_flow = lateral flow of each grid-cell as calculated in two parts earlier
+                #   lateral_flow is positive when flow going out of the grid cells (saved as -lateral_flow)
+                # mbe = state0 - Wsto_deep - lateral_flow (makes sense)
 
-        # new update state
-        # state0 = water storage at timestep0 (including bucket drainage at timestep0)
-        # Wsto_deep = water storage at timestep1
-        # lateral_flow = lateral flow of each grid-cell as calculated in two parts earlier
-        #   lateral_flow is positive when flow going out of the grid cells (saved as -lateral_flow)
-        # mbe = state0 - Wsto_deep - lateral_flow (makes sense)
+                # Let's limit head to 0 and assign rest as return flow to bucketgrid
+                Wsto_before_qr = self.Wsto_deep.copy()
 
-        # Let's limit head to 0 and assign rest as return flow to bucketgrid
-        Wsto_before_qr = self.Wsto_deep.copy()
+                # restricting gwl to 0 on land and, and to minimum of gwl and ditch_h in ditches
+                self.gwl = np.where(self.ditch_h < -eps, np.minimum(self.gwl, self.ditch_h), np.minimum(0.0, self.gwl))
+                self.H = self.gwl + self.ele
+                self.H[np.isnan(self.H)] = -999
 
-        # restricting gwl to 0 on land and, and to minimum of gwl and ditch_h in ditches
-        self.gwl = np.where(self.ditch_h < -eps, np.minimum(self.gwl, self.ditch_h), np.minimum(0.0, self.gwl))
-        self.H = self.gwl + self.ele
-        self.H[np.isnan(self.H)] = -999
+                # Updating the storage according to new head
+                if not self.z_from_gis:
+                    for key, value in self.gwl_to_wsto.items():
+                        self.Wsto_deep[self.soiltype == key] = value(self.H[self.soiltype == key] - self.ele[self.soiltype == key])
+                    #for key, value in self.gwl_to_rootmoist.items():
+                    #    self.deepmoist[self.soiltype == key] = value(self.gwl[self.soiltype == key])
+                elif self.z_from_gis:
+                    for i in range(self.gwl_to_wsto.shape[0]):
+                        for j in range(self.gwl_to_wsto.shape[1]):
+                            if np.isfinite(self.cmask[i,j]):
+                                self.Wsto_deep[i,j] = self.gwl_to_wsto[i,j](self.H[i,j] - self.ele[i,j])
+                                #self.deepmoist[i,j] = self.gwl_to_rootmoist[i,j](self.gwl[i,j])
 
-        # Updating the storage according to new head
-        if not self.z_from_gis:
-            for key, value in self.gwl_to_wsto.items():
-                self.Wsto_deep[self.soiltype == key] = value(self.H[self.soiltype == key] - self.ele[self.soiltype == key])
-            #for key, value in self.gwl_to_rootmoist.items():
-            #    self.deepmoist[self.soiltype == key] = value(self.gwl[self.soiltype == key])
-        elif self.z_from_gis:
-            for i in range(self.gwl_to_wsto.shape[0]):
-                for j in range(self.gwl_to_wsto.shape[1]):
-                    if np.isfinite(self.cmask[i,j]): 
-                        self.Wsto_deep[i,j] = self.gwl_to_wsto[i,j](self.H[i,j] - self.ele[i,j])  
-                        #self.deepmoist[i,j] = self.gwl_to_rootmoist[i,j](self.gwl[i,j])
+                # The difference is the return flow to bucketgrid
+                qr = Wsto_before_qr - self.Wsto_deep
 
-        # The difference is the return flow to bucketgrid
-        qr = Wsto_before_qr - self.Wsto_deep
+                # ditches are described as constant heads so the netflow to ditches can
+                # be calculated from their mass balance
+                netflow_to_ditch = np.where(self.ditch_h < -eps, state0 - self.Wsto_deep - lateral_flow, 0.0)
+                netflow_to_ditch += np.where(self.ditch_h < -eps, Wsto_before_qr - self.Wsto_deep, 0.)
 
-        # ditches are described as constant heads so the netflow to ditches can
-        # be calculated from their mass balance
-        netflow_to_ditch = np.where(self.ditch_h < -eps, state0 - self.Wsto_deep - lateral_flow, 0.0)
-        netflow_to_ditch += np.where(self.ditch_h < -eps, Wsto_before_qr - self.Wsto_deep, 0.)
+                # air volume
+                self.airv_deep = np.maximum(0.0, self.Wsto_deep_max - self.Wsto_deep)
 
-        # air volume
-        self.airv_deep = np.maximum(0.0, self.Wsto_deep_max - self.Wsto_deep)
-        
-        # mass balance error [m]
-        mbe = (state0  - self.Wsto_deep - qr - lateral_flow)
-        mbe = np.where(self.ditch_h < -eps, 0.0, mbe)
+                # mass balance error [m]
+                mbe = (state0  - self.Wsto_deep - qr - lateral_flow)
+                mbe = np.where(self.ditch_h < -eps, 0.0, mbe)
 
-        # outputs multiplied by cmask
-        h_out = self.gwl.copy() * self.cmask
-        lateral_flow = lateral_flow * self.cmask
-        netflow_to_ditch = netflow_to_ditch * self.cmask
-        mbe = mbe * self.cmask
-        #deepmoist_out = self.deepmoist.copy() * self.cmask
-        Wsto_deep_out = self.Wsto_deep.copy() * self.cmask
+                # outputs multiplied by cmask
+                h_out = self.gwl.copy() * self.cmask
+                lateral_flow = lateral_flow * self.cmask
+                netflow_to_ditch = netflow_to_ditch * self.cmask
+                mbe = mbe * self.cmask
+                #deepmoist_out = self.deepmoist.copy() * self.cmask
+                Wsto_deep_out = self.Wsto_deep.copy() * self.cmask
 
-        results = {
-                'ground_water_level': h_out,  # [m]
-                'lateral_netflow': -lateral_flow * 1e3 / dt,  # [mm d-1]
-                'netflow_to_ditch': netflow_to_ditch * 1e3 / dt,  # [mm d-1]
-                'water_closure': mbe * 1e3 / dt,  # [mm d-1]
-                #'moisture_deep': deepmoist_out,  # [m3 m-3]
-                'water_storage': Wsto_deep_out * 1e3, # [mm]
-                'return_flow': qr * 1e3, # [mm],
-                'transmissivity': Tr,  # [m2 d-1]
-                }
-        return results
+                results = {
+                        'ground_water_level': h_out,  # [m]
+                        'lateral_netflow': -lateral_flow * 1e3 / dt_sub,  # [mm d-1]
+                        'netflow_to_ditch': netflow_to_ditch * 1e3 / dt_sub,  # [mm d-1]
+                        'water_closure': mbe * 1e3 / dt_sub,  # [mm d-1]
+                        #'moisture_deep': deepmoist_out,  # [m3 m-3]
+                        'water_storage': Wsto_deep_out * 1e3, # [mm]
+                        'return_flow': qr * 1e3, # [mm]
+                        'transmissivity': Tr,  # [m2 d-1]
+                        }
+
+                # Accumulate sub-step results:
+                # rates are averaged over sub-steps; return_flow is summed; states taken from last sub-step
+                if acc is None:
+                    acc = {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in results.items()}
+                else:
+                    for k in ['lateral_netflow', 'netflow_to_ditch', 'water_closure', 'transmissivity']:
+                        acc[k] = acc[k] + results[k]
+                    acc['return_flow']        += results['return_flow']
+                    acc['ground_water_level']  = results['ground_water_level']
+                    acc['water_storage']       = results['water_storage']
+                # end of sub-step loop
+
+            if rejected:
+                if n_sub < max_substeps:
+                    n_sub *= 2
+                    print(f'Timestep: {self.tmstep}, step rejected, retrying with {n_sub} sub-steps')
+                    continue  # retry with smaller dt_sub
+                else:
+                    print(f'Timestep: {self.tmstep}, max_substeps ({max_substeps}) reached, proceeding anyway')
+                    break
+            break  # all sub-steps converged successfully
+
+        # Average rate outputs over sub-steps
+        for k in ['lateral_netflow', 'netflow_to_ditch', 'water_closure', 'transmissivity']:
+            acc[k] = acc[k] / n_sub
+
+        return acc
 
 
 def gwl_Wsto(z, pF, grid_step=-0.01, Ksat=None, root=False):
