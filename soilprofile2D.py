@@ -78,6 +78,7 @@ class SoilGrid_2Dflow(object):
         # deep soil
         # soil/peat type
         self.soiltype = spara['soiltype']
+        self.deep_id = spara['deep_id']
         
         # catchment mask
         self.cmask = np.full_like(spara['deep_id'], np.nan)
@@ -588,14 +589,24 @@ class SoilGrid_2Dflow(object):
                 break
             # end of iteration loop
         if it == 99:
-            self.conv99 +=1
+            self.conv99 += 1
         Htmp = np.reshape(Htmp,(self.rows,self.cols))
 
         i, j = max_index
+        deep_id_val = self.deep_id[i, j] if hasattr(self, 'deep_id') else 'N/A'
         print(f'Timestep: {self.tmstep}, iterations: {it}, worst conv1: {conv1:.4f} m'
               f' at [{i},{j}] gwl: {Htmp[i,j]-self.ele[i,j]:.3f} m'
               f', ditch_h: {self.ditch_h[i,j]:.3f}'
-              f', Tr: {self.Tr1[i,j]:.4f} m2/d')
+              f', Tr: {self.Tr1[i,j]:.4f} m2/d'
+              f', deep_id: {deep_id_val}')
+        if it == 99:
+            non_conv = np.abs(np.reshape(Htmp1, (self.rows, self.cols)) - Htmp) > crit
+            non_conv &= np.isfinite(self.ele)
+            print(f'  Non-converged cells: {np.sum(non_conv)}')
+            if hasattr(self, 'deep_id'):
+                ids, counts = np.unique(self.deep_id[non_conv], return_counts=True)
+                for did, cnt in zip(ids, counts):
+                    print(f'    deep_id={int(did)}: {cnt} cells')
         
         # lateral flow [m d-1] is calculated in two parts: one depending on previous time step
         # and other on current time step (lateral flowsee 2/2). Their weighting depends

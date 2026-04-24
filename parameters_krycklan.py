@@ -12,9 +12,9 @@ def parameters(folder=''):
     pgen = {'description': 'final_run',  # description written in result file
             'simtype': '2D', # 1D, TOP, 2D,
             'start_date': '2013-01-01',  # '2011-01-01', for tests: '2020-01-01'
-            'end_date': '2016-12-31', # 2017-09-01,
+            'end_date': '2015-09-01', # 2017-09-01,
             #'spinup_file': r'F:\SpaFHy_2D_2021/testcase_input_202304051037_spinup.nc',
-            'spinup_end': '2014-01-01',  # '2015-09-01', for tests: '2020-09-01' results after this are saved in result file
+            'spinup_end': '2014-09-01',  # '2015-09-01', for tests: '2020-09-01' results after this are saved in result file
             'dt': 86400.0,
             'spatial_cpy': True,  # if False uses parameters from cpy['state']
             # else needs cf.dat, hc.dat, LAI_decid.dat, LAI_spruce.dat, LAI_pine.dat, (cmask.dat)
@@ -28,7 +28,7 @@ def parameters(folder=''):
             'spatial_forcing': False,  # if False uses forcing from forcing file with pgen['forcing_id'] and cpy['loc']
             'spatial_radiation_file': None, # if spatial radiation file, otherwise None
             # else needs Ncoord.dat, Ecoord.dat, forcing_id.dat
-            'gis_folder': str(pathlib.Path(folder+r'/gis/40m')),
+            'gis_folder': str(pathlib.Path(folder+r'/gis/20m')),
             'forcing_file': str(pathlib.Path(folder+r'/forcing/FORCING.csv')),
             'forcing_id': 0,  # used if spatial_forcing == False
             'ncf_file': time.strftime('%Y%m%d%H%M') + r'.nc',  # timestamp to result file name to avoid saving problem when running repeatedly
@@ -67,7 +67,7 @@ def parameters(folder=''):
                     ['forcing_global_radiation', 'global radiation [Wm-2]'],
                     ['forcing_wind_speed','wind speed [m s-1]'],
                     ['forcing_wind_direction','wind direction [degrees]'],                
-                    #['bucket_pond_storage', 'pond storage [m]'],
+                    ['bucket_pond_storage', 'pond storage [m]'],
                     ['bucket_moisture_top', 'volumetric water content of moss layer [m3 m-3]'],
                     ['bucket_moisture_root', 'volumetric water content of rootzone [m3 m-3]'],
                     ['bucket_lateral_netflow', 'lateral overland netflow [mm d-1]'],
@@ -242,7 +242,6 @@ def parameters(folder=''):
             'stream_distance': 'channels_distance.asc', # average distance to stream
             'stream_length': 'channels_length.asc', # total stream length
             'stream_width': 'channels_width.asc', # average stream width
-            'stream_ksat': 1E-05,  # hydraulic conductivity of stream/ditch bed [m s-1] (Cauchy BC only)
             'lakes': 'lake_mask.asc',
             'deep_z': 'soildepth.asc',
             'deep_poros': 0.41,
@@ -251,7 +250,7 @@ def parameters(folder=''):
             'deep_n': 1.2,
             'deep_ksat': 1E-05,
             # initial states
-            'ground_water_level': -4.0,  # groundwater depth [m]
+            'ground_water_level': -1.0,  # groundwater depth [m]
             'stream_depth': 'channels_depth.asc', #  # initial stream water level relative to ground surface (currently not dynamic) [m]
             'lake_depth': -1.0  # initial lake water level relative to ground surface (currently not dynamic) [m]
             }
@@ -437,6 +436,7 @@ def deep_properties(): # this is meant to be run with soildepth.asc
                 'n': [1.2] * 5
             },
             'deep_ksat': [1E-07, 3E-5, 3E-5, 1E-8, 3E-5],
+            'stream_ksat': 1E-07,
         },
         'Glaciofluvial_sediment': { # Glacial deposit: Sterte et al. 2018
             'deep_id': 2,
@@ -448,6 +448,7 @@ def deep_properties(): # this is meant to be run with soildepth.asc
                 'n': [1.2] * 5
             },
             'deep_ksat': [1E-04] * 5,
+            'stream_ksat': 1E-04,
         },
         'Peat': { # Peat: Sterte et al. 2018
             'deep_id': 3,
@@ -458,9 +459,10 @@ def deep_properties(): # this is meant to be run with soildepth.asc
                 'alpha': [0.072] * 5,
                 'n': [1.255] * 5
             },
-            'deep_ksat': [1E-6, 1E-6, 1E-6, 1E-9, 1E-7],
+            'deep_ksat': [1E-6, 1E-6, 1E-6, 1E-9, 1E-6],
+            'stream_ksat': 1E-06,
         },
-        'Postglacial_sand_gravel': { # Sandy sediment: Sterte et al. 2018 
+        'Postglacial_sand_gravel': { # Sandy sediment: Sterte et al. 2018
             'deep_id': 4,
             'deep_z': [-0.4, -0.8, -2.0, -3.0, -5.0],
             'pF': {
@@ -469,9 +471,10 @@ def deep_properties(): # this is meant to be run with soildepth.asc
                 'alpha': [0.024] * 5,
                 'n': [1.2] * 5
             },
-            'deep_ksat': [3E-5, 3E-5, 1E-8, 1E-8, 1E-7],
+            'deep_ksat': [3E-5, 3E-5, 1E-8, 1E-8, 1E-6],
+            'stream_ksat': 3E-05,
         },
-        'Clay_silt': { # Silt/Clay: Sterte et al. 2018 
+        'Clay_silt': { # Silt/Clay: Sterte et al. 2018
             'deep_id': 5,
             'deep_z': [-1.0, -2.0, -2.5, -3.0, -5.0],
             'pF': {
@@ -480,9 +483,10 @@ def deep_properties(): # this is meant to be run with soildepth.asc
                 'alpha': [0.018] * 5,
                 'n': [1.16] * 5
             },
-            'deep_ksat': [1E-08, 1E-8, 1E-8, 1E-8, 1E-7],
+            'deep_ksat': [1E-08, 1E-8, 1E-8, 1E-8, 1E-6],
+            'stream_ksat': 1E-08,
         },
-        'Washed_sediment_gravel_boulders': { # Till: Sterte et al. 2018 
+        'Washed_sediment_gravel_boulders': { # Till: Sterte et al. 2018
             'deep_id': 6,
             'deep_z': [-0.5, -1.0, -1.5, -2.5, -5.0],
             'pF': {
@@ -491,9 +495,10 @@ def deep_properties(): # this is meant to be run with soildepth.asc
                 'alpha': [0.024] * 5,
                 'n': [1.2] * 5
             },
-            'deep_ksat': [2E-07, 2E-7, 2E-7, 2E-7, 1E-7],
+            'deep_ksat': [1E-5, 2E-6, 2E-7, 2E-7, 1E-7],
+            'stream_ksat': 5E-05,
         },
-        'Water': { # Clay under lakes: Sterte et al. 2018 
+        'Water': { # Clay under lakes: Sterte et al. 2018
             'deep_id': 7,
             'deep_z': [-1.0, -2.0, -3.0, -5.0, -6.0],
             'pF': {
@@ -503,8 +508,9 @@ def deep_properties(): # this is meant to be run with soildepth.asc
                 'n': [1.2] * 5
             },
             'deep_ksat': [1E-09, 1E-09, 1E-09, 1E-09, 1E-07],
+            'stream_ksat': 1E-09,
         },
-        'Moraine': { # Till: Sterte et al. 2018 
+        'Moraine': { # Till: Sterte et al. 2018
             'deep_id': 8,
             'deep_z': [-0.5, -1.0, -1.5, -2.5, -5.0],
             'pF': {
@@ -513,9 +519,10 @@ def deep_properties(): # this is meant to be run with soildepth.asc
                 'alpha': [0.024] * 5,
                 'n': [1.2] * 5
             },
-            'deep_ksat': [2E-07, 2E-7, 2E-7, 2E-7, 1E-7],
+            'deep_ksat': [1E-5, 2E-6, 1E-6, 2E-7, 1E-7],
+            'stream_ksat': 5E-05,
         },
-        'Fill': { # Till: Sterte et al. 2018 
+        'Fill': { # Till: Sterte et al. 2018
             'deep_id': 9,
             'deep_z': [-0.5, -1.0, -1.5, -2.5, -5.0],
             'pF': {
@@ -524,9 +531,10 @@ def deep_properties(): # this is meant to be run with soildepth.asc
                 'alpha': [0.024] * 5,
                 'n': [1.2] * 5
             },
-            'deep_ksat': [2E-07, 2E-7, 2E-7, 2E-7, 1E-7],
+            'deep_ksat': [2E-06, 2E-6, 2E-6, 2E-6, 1E-6],
+            'stream_ksat': 2E-06,
         },
-        'Bedrock': { # Bedrock: Sterte et al. 2018 
+        'Bedrock': { # Bedrock: Sterte et al. 2018
             'deep_id': 10,
             'deep_z': [-1.0, -2.0, -3.0, -4.0, -5.0],
             'pF': {
@@ -536,8 +544,9 @@ def deep_properties(): # this is meant to be run with soildepth.asc
                 'n': [1.2] * 5
             },
             'deep_ksat': [1E-06] * 5,
+            'stream_ksat': 1E-06,
         },
-        'Fluvial_sediment_sand': { # Sandy sediments: Sterte et al. 2018 
+        'Fluvial_sediment_sand': { # Sandy sediments: Sterte et al. 2018
             'deep_id': 11,
             'deep_z': [-0.4, -0.8, -2.0, -3.0, -5.0],
             'pF': {
@@ -547,6 +556,7 @@ def deep_properties(): # this is meant to be run with soildepth.asc
                 'n': [1.2] * 5
             },
             'deep_ksat': [3E-5, 3E-5, 1E-8, 1E-8, 1E-7],
+            'stream_ksat': 3E-05,
         }
     }
     return deepp
