@@ -496,7 +496,7 @@ def deep_properties(): # this is meant to be run with soildepth.asc
                 'n': [1.2] * 5
             },
             'deep_ksat': [1E-5, 2E-6, 2E-7, 2E-7, 1E-7],
-            'stream_ksat': 5E-05,
+            'stream_ksat': 1E-06,
         },
         'Water': { # Clay under lakes: Sterte et al. 2018
             'deep_id': 7,
@@ -520,7 +520,7 @@ def deep_properties(): # this is meant to be run with soildepth.asc
                 'n': [1.2] * 5
             },
             'deep_ksat': [1E-5, 2E-6, 1E-6, 2E-7, 1E-7],
-            'stream_ksat': 5E-05,
+            'stream_ksat': 1E-06,
         },
         'Fill': { # Till: Sterte et al. 2018
             'deep_id': 9,

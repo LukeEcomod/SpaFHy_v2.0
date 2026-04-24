@@ -675,19 +675,16 @@ def preprocess_dsdata_vec(pspd, spatial_pspd, deepp, gisdata, spatial=True):
 
     data.update({'soiltype': np.empty(np.shape(gisdata['deep_id']),dtype=object)})
 
-    stream_ksat_2d = np.full(np.shape(gisdata['deep_id']), np.nan)
     if not spatial_data.get('deep_z', False):
         for key, value in deepp.items():
             c = value['deep_id']
             ix = np.where(data['deep_id'] == c)
             data['soiltype'][ix] = key
             data['deep_z'][ix] = value['deep_z']
-            stream_ksat_2d[ix] = value.get('stream_ksat', data.get('stream_ksat', 1E-5))
             # interpolation function between wsto and gwl
             value.update(gwl_Wsto(value['deep_z'], value['pF'], -0.01, value['deep_ksat']))
             # interpolation function between root_wsto and gwl
             value.update(gwl_Wsto(value['deep_z'][:2], {key: value['pF'][key][:2] for key in value['pF'].keys()}, root=True))
-        data['stream_ksat'] = stream_ksat_2d
         
         data['wtso_to_gwl'] = {soiltype: deepp[soiltype]['to_gwl'] for soiltype in deepp.keys()}
         data['gwl_to_wsto'] = {soiltype: deepp[soiltype]['to_wsto'] for soiltype in deepp.keys()}
@@ -757,6 +754,13 @@ def preprocess_dsdata_vec(pspd, spatial_pspd, deepp, gisdata, spatial=True):
         data['gwl_to_Tr'] = temp_to_Tr.reshape(gridshape.shape)
         data['gwl_to_rootmoist'] = temp_to_rootmoist.reshape(gridshape.shape)
         data['deep_z'] = deep_z_f.reshape(data['deep_z'].shape)
+
+    # stream_ksat 2D — always built from deep_id regardless of spatial_z branch
+    stream_ksat_2d = np.full(np.shape(gisdata['deep_id']), np.nan)
+    for key, value in deepp.items():
+        ix = np.where(data['deep_id'] == value['deep_id'])
+        stream_ksat_2d[ix] = value.get('stream_ksat', 1E-5)
+    data['stream_ksat'] = stream_ksat_2d
 
     data['lakes'] = np.where(data['lakes'] < -eps, pspd['lake_depth'], 0)
 

@@ -320,13 +320,11 @@ class SoilGrid_2Dflow(object):
             ditch_w = np.ravel(self.ditch_w)
             ditch_d = np.ravel(self.ditch_d)
             stream_ksat = np.ravel(self.stream_ksat)
-            # ditch drainage [m] - outside iteration loop to avoid ditch switching on and off during iteration
-            S_dd = np.where((ditch_h < -eps) & (ele + ditch_h < H),
-                            stream_ksat * ditch_l * ditch_w / ditch_d * (H - (ele + ditch_h)) * dt / self.dxy**2,
-                            0.0)
+            # drainage conductance [m²/d] — head-independent part; drainage treated implicitly inside loop
+            C_dd = stream_ksat * ditch_l * ditch_w / ditch_d
         else:
-            S_dd = np.zeros_like(H)
-        
+            C_dd = np.zeros_like(H)
+
         # testing Di Ciacci et al., 2019
         #M = 0.1 # thickness of channel bed [m]
         #Ksb = 1E-03 * 86400. # hydraulic conductivity of channel bed [m/d]
@@ -494,12 +492,18 @@ class SoilGrid_2Dflow(object):
             a_s = -self.implic * TrS1[:self.n-self.cols]  # South element
 
             # Knowns: Right hand side of the eq
-            Htmp = np.ravel(Htmp)  
-            hs = (np.ravel(S) * self.dxy**2 / dt + alfa * Htmp - S_dd * self.dxy**2 / dt
+            Htmp = np.ravel(Htmp)
+            hs = (np.ravel(S) * self.dxy**2 / dt + alfa * Htmp
                   - np.ravel(self.Wtso1_deep) * self.dxy**2 / dt + Wsto_deep * self.dxy**2 / dt
                   + (1.-self.implic) * (TrN0*HN) + (1.-self.implic) * (TrW0*HW)
                   - (1.-self.implic) * (TrN0 + TrW0 + TrE0 + TrS0) * H
                   + (1.-self.implic) * (TrE0*HE) + (1.-self.implic) * (TrS0*HS))
+
+            # implicit Cauchy drainage: conductance added to diagonal, threshold contribution to RHS
+            if self.ditch_boundary == 'Cauchy':
+                ditch_active = (ditch_h < -eps) & (Htmp > ele + ditch_h)
+                a_d[ditch_active] += C_dd[ditch_active]
+                hs[ditch_active] += C_dd[ditch_active] * (ele[ditch_active] + ditch_h[ditch_active])
 
             # Constant-head boundary cells (lakes for Cauchy; ditches+lakes for Dirichlet)
             for k in np.where(bc_h < -eps)[0]:
@@ -521,7 +525,6 @@ class SoilGrid_2Dflow(object):
                 terms = {
                     'S':        np.ravel(S) * self.dxy**2 / dt,
                     'alfa*Htmp': alfa * Htmp,
-                    'S_dd':     S_dd * self.dxy**2 / dt,
                     'Wtso1':    np.ravel(self.Wtso1_deep) * self.dxy**2 / dt,
                     'Wsto':     Wsto_deep * self.dxy**2 / dt,
                     'lateral':  (1.-self.implic) * (TrN0*HN + TrW0*HW + TrE0*HE + TrS0*HS
@@ -557,7 +560,7 @@ class SoilGrid_2Dflow(object):
                     i, j = idx
                     print(f'  [{i},{j}] gwl: {Htmp_2d[i,j]-self.ele[i,j]:.3f} -> {Htmp1_2d[i,j]-self.ele[i,j]:.3f} m'
                           f', ditch_h: {self.ditch_h[i,j]:.3f}'
-                          f', S_dd: {S_dd[i*self.cols+j]:.4f} m'
+                          f', C_dd: {C_dd[i*self.cols+j]:.4f} m2/d'
                           f', Tr: {self.Tr1[i,j]:.4f} m2/d')
                     
             if self.tmstep <= self.spinup_steps:
@@ -591,6 +594,15 @@ class SoilGrid_2Dflow(object):
         if it == 99:
             self.conv99 += 1
         Htmp = np.reshape(Htmp,(self.rows,self.cols))
+
+        # recompute S_dd [m] from converged head for mass balance and output
+        if self.ditch_boundary == 'Cauchy':
+            H_conv = np.ravel(Htmp)
+            S_dd = np.where((ditch_h < -eps) & (H_conv > ele + ditch_h),
+                            C_dd * (H_conv - (ele + ditch_h)) * dt / self.dxy**2,
+                            0.0)
+        else:
+            S_dd = np.zeros(self.n)
 
         i, j = max_index
         deep_id_val = self.deep_id[i, j] if hasattr(self, 'deep_id') else 'N/A'
