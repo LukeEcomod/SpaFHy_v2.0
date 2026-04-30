@@ -679,18 +679,21 @@ def preprocess_dsdata_vec(pspd, spatial_pspd, deepp, gisdata, spatial=True):
         for key, value in deepp.items():
             c = value['deep_id']
             ix = np.where(data['deep_id'] == c)
+            if len(ix[0]) == 0:  # soil type defined in deepp but absent from this catchment
+                continue
             data['soiltype'][ix] = key
-            data['deep_z'][ix] = value['deep_z']
+            data['deep_z'][ix] = -value['deep_z'][-1]  # negate: deepp uses negative gwl-convention depths; soilprofile2D expects positive (multiplies by -1)
             # interpolation function between wsto and gwl
             value.update(gwl_Wsto(value['deep_z'], value['pF'], -0.01, value['deep_ksat']))
             # interpolation function between root_wsto and gwl
             value.update(gwl_Wsto(value['deep_z'][:2], {key: value['pF'][key][:2] for key in value['pF'].keys()}, root=True))
         
-        data['wtso_to_gwl'] = {soiltype: deepp[soiltype]['to_gwl'] for soiltype in deepp.keys()}
-        data['gwl_to_wsto'] = {soiltype: deepp[soiltype]['to_wsto'] for soiltype in deepp.keys()}
-        data['gwl_to_C'] = {soiltype: deepp[soiltype]['to_C'] for soiltype in deepp.keys()}
-        data['gwl_to_Tr'] = {soiltype: deepp[soiltype]['to_Tr'] for soiltype in deepp.keys()}
-        data['gwl_to_rootmoist'] = {soiltype: deepp[soiltype]['to_rootmoist'] for soiltype in deepp.keys()}
+        active = [st for st in deepp.keys() if 'to_gwl' in deepp[st]]  # soil types present in this catchment
+        data['wtso_to_gwl']    = {st: deepp[st]['to_gwl']       for st in active}
+        data['gwl_to_wsto']    = {st: deepp[st]['to_wsto']       for st in active}
+        data['gwl_to_C']       = {st: deepp[st]['to_C']          for st in active}
+        data['gwl_to_Tr']      = {st: deepp[st]['to_Tr']         for st in active}
+        data['gwl_to_rootmoist'] = {st: deepp[st]['to_rootmoist'] for st in active}
 
     elif spatial_data['deep_z']:
         # we have data['deep_id'] and data['z']
@@ -702,6 +705,7 @@ def preprocess_dsdata_vec(pspd, spatial_pspd, deepp, gisdata, spatial=True):
         deep_id_f = data['deep_id'].flatten()
         deep_z = data['deep_z']
         deep_z[deep_z < 5] = 5. # NOTE MINIMUM IS 5M DEPTH!
+        #deep_z[deep_z > 8] = 8. # NOTE MAXIMUM IS 8M DEPTH!
         deep_z_f = deep_z.flatten()
         # creating the arrays
         deep_zs = np.full((len(deep_id_f), max_nlyrs), np.nan)
