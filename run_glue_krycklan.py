@@ -127,6 +127,9 @@ if __name__ == '__main__':
     _project_folder = os.environ.get('PROJECT_FOLDER')
     if _project_folder is None:
         raise EnvironmentError('PROJECT_FOLDER is not set. Define it in .env or the environment.')
+    _results_folder = os.environ.get('SPAFHY_RESULTS_FOLDER')
+    if not _results_folder or not _results_folder.strip():
+        raise EnvironmentError('SPAFHY_RESULTS_FOLDER is not set. Define it in .env or the environment.')
     folder = str(Path(_project_folder) / 'krycklan')
     catchment_no = 2
     runoff_folder = os.path.join(folder, 'obs', 'DISCHARGE')
@@ -141,7 +144,7 @@ if __name__ == '__main__':
     print(f'Using {n_workers} worker processes')
 
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-    output_dir = Path(folder) / 'results' / 'glue_krycklan' / timestamp
+    output_dir = Path(_results_folder).expanduser() / 'krycklan' / 'glue_krycklan' / timestamp
     output_dir.mkdir(parents=True, exist_ok=True)
 
     context = {
