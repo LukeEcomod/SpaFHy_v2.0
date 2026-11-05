@@ -12,16 +12,15 @@ from dotenv import load_dotenv
 
 from model_driver import driver
 from read_runoff import read_runoff, kge, mbe, rmse
-from scripts.create_soil_params import create_soil_params
+from scripts.create_soil_params import _KMIN, create_soil_params
 
 load_dotenv()
 
 SOIL_TYPE = 'Medium'
 DEFAULT_N_SAMPLES = 10_000
 DEFAULT_SEED = 42
-F_BOUNDS = (6.0, 16.0)
+F_BOUNDS = (6.0, 24.0)
 KMAX_BOUNDS = (1e-5, 0.1)
-KMIN_BOUNDS = (1e-9, 1e-6)
 
 WORKER_CONTEXT = {}
 
@@ -38,12 +37,11 @@ def sample_glue_parameters(n_samples, seed=None):
     while len(samples) < n_samples:
         batch_size = max(1000, n_samples - len(samples))
         kmax_candidates = 10 ** rng.uniform(np.log10(KMAX_BOUNDS[0]), np.log10(KMAX_BOUNDS[1]), batch_size)
-        kmin_candidates = 10 ** rng.uniform(np.log10(KMIN_BOUNDS[0]), np.log10(KMIN_BOUNDS[1]), batch_size)
         f_candidates = rng.uniform(F_BOUNDS[0], F_BOUNDS[1], batch_size)
 
-        valid = kmin_candidates < kmax_candidates
-        for kmax, kmin, f in zip(kmax_candidates[valid], kmin_candidates[valid], f_candidates[valid]):
-            samples.append((float(kmax), float(kmin), float(f)))
+        valid = _KMIN[SOIL_TYPE] < kmax_candidates
+        for kmax, f in zip(kmax_candidates[valid], f_candidates[valid]):
+            samples.append((float(kmax), float(f)))
             if len(samples) >= n_samples:
                 break
 
@@ -58,7 +56,7 @@ def extract_runoff_from_results(results):
 
 
 def run_sample(sample):
-    sample_id, kmax, kmin, f = sample
+    sample_id, kmax, f = sample
     context = WORKER_CONTEXT
 
     folder = context['folder']
@@ -68,9 +66,10 @@ def run_sample(sample):
     soil_type = context['soil_type']
 
     kmax_values = {soil_type: kmax}
-    kmin_values = {soil_type: kmin}
     f_values = {soil_type: f}
-    psoil = create_soil_params(kmax_values, kmin_values, f_values, write=False, verbose=False)
+    psoil = create_soil_params(
+        kmax_values=kmax_values, f_values=f_values, write=False, verbose=False, plot=False
+    )
 
     parameters_module = importlib.import_module('parameters_krycklan')
     pgen, _, _, _ = parameters_module.parameters(folder, soil_params=psoil)
@@ -107,7 +106,7 @@ def run_sample(sample):
     return {
         'sample_id': sample_id,
         f'kmax_{soil_type}': kmax,
-        f'kmin_{soil_type}': kmin,
+        f'kmin_{soil_type}': _KMIN[soil_type],
         f'f_{soil_type}': f,
         'kge_tot': kge(q_df['q_obs'], q_df['q_sim']),
         'rmse_tot': rmse(q_df['q_obs'], q_df['q_sim']),

@@ -38,7 +38,7 @@ kPa_to_cm = 1.0 / (100.0 / 9.81)   # = 0.09810
 _DEFAULT_KMAX = {
     'Bedrock':  1e-5,
     'Peat':     1e-3,
-    'Fine':     1e-5,
+    'Fine':     1e-4,
     'Medium':   1e-2,
     'Coarse':   1e-3,
 }
@@ -46,9 +46,9 @@ _DEFAULT_KMAX = {
 _DEFAULT_F = {                  # Ksat decay coefficient [m-1]
     'Bedrock':  15.0,
     'Peat':     6.0,
-    'Fine':     6.0,
+    'Fine':     4.0,
     'Medium':   20.0,
-    'Coarse':   3.0,
+    'Coarse':   1.5,
 }
 
 _KMIN = {
@@ -60,11 +60,11 @@ _KMIN = {
 }
 
 _MAX_DEPTH = {
-    'Bedrock':  10.0,
-    'Peat':     10.0,
-    'Fine':     10.0,
-    'Medium':   10.0,
-    'Coarse':   10.0,
+    'Bedrock':  15.0,
+    'Peat':     15.0,
+    'Fine':     15.0,
+    'Medium':   15.0,
+    'Coarse':   15.0,
 }
 
 _CONST_SURF_KMAX = {             # depth [m] over which Ksat is held constant at Kmax before exponential decay
@@ -231,7 +231,7 @@ def create_soil_params(
             'deep_id':          props['deep_id'],
             'Kmax':             kmax[soil_type],
             'f':                f[soil_type],
-            'Kmin':             _KMIN[soil_type],
+            'Kmin':             kmin[soil_type],
             'max_depth':        max_depth[soil_type],
             'ThetaS_max':       _THETAS_MAX[soil_type],
             'ThetaS_min':       _THETAS_MIN[soil_type],

@@ -85,6 +85,7 @@ def run_single_simulation(
         f_values=param_sets['f_values'],
         write=False,
         verbose=False,
+        plot=False,
     )
 
     parameters_module = importlib.import_module('parameters_krycklan')
