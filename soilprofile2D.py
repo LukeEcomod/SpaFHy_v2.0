@@ -505,7 +505,9 @@ class SoilGrid_2Dflow(object):
                 results (dict) with keys:
                     'ground_water_level'  [m]:      updated groundwater level below surface
                     'lateral_netflow'     [mm d-1]: net lateral flow (positive = outflow)
-                    'netflow_to_ditch'    [mm d-1]: net flow into streams/ditches
+                    'netflow_to_ditch'    [mm d-1]: net flow into streams/ditches;
+                        includes lake flow when ditch_boundary is Dirichlet
+                    'netflow_to_lake'     [mm d-1]: net flow into lakes in Cauchy mode
                     'water_closure'       [mm d-1]: mass balance error (should be ~0)
                     'water_storage'       [mm]:     deep soil water storage
                     'return_flow'         [mm]:     return flow to BucketGrid (when gwl > 0)
@@ -723,79 +725,71 @@ class SoilGrid_2Dflow(object):
                             Tr_ditch_2d[i, j] = self.gwl_to_Tr[i, j](self.ditch_h[i, j])
             Tr_ditch = np.ravel(Tr_ditch_2d)
 
-        update_Tr_in_loop = True
         converged = False
 
         for it in range(self.maxiter):
-            if update_Tr_in_loop:
-                # transmissivity [m2 d-1] to neighbouring cells with HTmp1
-                # see the pre-loop Tr0 computation above for why lakes are
-                # excluded from the H_neighbours substitution under Cauchy
-                if self.ditch_boundary == 'Dirichlet':
-                    H_for_Tr = np.where((bc_h_2d < -eps) & (H_neighbours_2d > self.ele + bc_h_2d),
-                                        H_neighbours_2d, Htmp)
-                else:
-                    H_for_Tr = Htmp
-                # transmissivities based on gwl
-                if not self.z_from_gis:
-                    for key, value in self.gwl_to_Tr.items():
-                        self.Tr1[self.soiltype == key] = value(H_for_Tr[self.soiltype == key] - self.ele[self.soiltype == key])
-                elif self.z_from_gis:
-                    for i in range(self.gwl_to_Tr.shape[0]):
-                        for j in range(self.gwl_to_Tr.shape[1]):
-                            if np.isfinite(self.cmask[i,j]):
-                                self.Tr1[i,j] = self.gwl_to_Tr[i,j](H_for_Tr[i,j] - self.ele[i,j])
-
-                # For Cauchy lake cells: set Tr to mean of aquifer neighbours
-                # (run before the ditch block below, see pre-loop comment above)
-                if self.ditch_boundary == 'Cauchy':
-                    for i in range(self.rows):
-                        for j in range(self.cols):
-                            if self.lake_h[i,j] < -eps and np.isfinite(self.cmask[i,j]):
-                                nbr = []
-                                if i > 0 and self.lake_h[i-1,j] > -eps and np.isfinite(self.cmask[i-1,j]):
-                                    nbr.append(self.Tr1[i-1,j])
-                                if i < self.rows-1 and self.lake_h[i+1,j] > -eps and np.isfinite(self.cmask[i+1,j]):
-                                    nbr.append(self.Tr1[i+1,j])
-                                if j > 0 and self.lake_h[i,j-1] > -eps and np.isfinite(self.cmask[i,j-1]):
-                                    nbr.append(self.Tr1[i,j-1])
-                                if j < self.cols-1 and self.lake_h[i,j+1] > -eps and np.isfinite(self.cmask[i,j+1]):
-                                    nbr.append(self.Tr1[i,j+1])
-                                if nbr:
-                                    self.Tr1[i,j] = np.mean(nbr)
-
-                # For Cauchy ditch cells: set Tr to mean of aquifer neighbours
-                if self.ditch_boundary == 'Cauchy':
-                    for i in range(self.rows):
-                        for j in range(self.cols):
-                            if self.ditch_h[i,j] < -eps and np.isfinite(self.cmask[i,j]):
-                                nbr = []
-                                if i > 0 and self.ditch_h[i-1,j] > -eps and np.isfinite(self.cmask[i-1,j]):
-                                    nbr.append(self.Tr1[i-1,j])
-                                if i < self.rows-1 and self.ditch_h[i+1,j] > -eps and np.isfinite(self.cmask[i+1,j]):
-                                    nbr.append(self.Tr1[i+1,j])
-                                if j > 0 and self.ditch_h[i,j-1] > -eps and np.isfinite(self.cmask[i,j-1]):
-                                    nbr.append(self.Tr1[i,j-1])
-                                if j < self.cols-1 and self.ditch_h[i,j+1] > -eps and np.isfinite(self.cmask[i,j+1]):
-                                    nbr.append(self.Tr1[i,j+1])
-                                if nbr:
-                                    self.Tr1[i,j] = np.mean(nbr)
-                
-                TrTmpEW, TrTmpNS = self._interface_transmissivity(self.Tr1)
-                self.TrW1[:,1:] = TrTmpEW
-                self.TrE1[:,:-1] = TrTmpEW
-                self.TrN1[1:,:] = TrTmpNS
-                self.TrS1[:-1,:]=TrTmpNS
-                del TrTmpEW, TrTmpNS
-                # ravel 2D arrays
-                TrW1 = np.ravel(self.TrW1); TrE1= np.ravel(self.TrE1)
-                TrN1 = np.ravel(self.TrN1); TrS1 = np.ravel(self.TrS1)
+            # transmissivity [m2 d-1] to neighbouring cells with HTmp1
+            # see the pre-loop Tr0 computation above for why lakes are
+            # excluded from the H_neighbours substitution under Cauchy
+            if self.ditch_boundary == 'Dirichlet':
+                H_for_Tr = np.where((bc_h_2d < -eps) & (H_neighbours_2d > self.ele + bc_h_2d),
+                                    H_neighbours_2d, Htmp)
             else:
-                # from previous timestep
-                TrW1 = TrW0.copy()
-                TrE1 = TrE0.copy()
-                TrN1 = TrN0.copy()
-                TrS1 = TrS0.copy()
+                H_for_Tr = Htmp
+            # transmissivities based on gwl
+            if not self.z_from_gis:
+                for key, value in self.gwl_to_Tr.items():
+                    self.Tr1[self.soiltype == key] = value(H_for_Tr[self.soiltype == key] - self.ele[self.soiltype == key])
+            elif self.z_from_gis:
+                for i in range(self.gwl_to_Tr.shape[0]):
+                    for j in range(self.gwl_to_Tr.shape[1]):
+                        if np.isfinite(self.cmask[i,j]):
+                            self.Tr1[i,j] = self.gwl_to_Tr[i,j](H_for_Tr[i,j] - self.ele[i,j])
+
+            # For Cauchy lake cells: set Tr to mean of aquifer neighbours
+            # (run before the ditch block below, see pre-loop comment above)
+            if self.ditch_boundary == 'Cauchy':
+                for i in range(self.rows):
+                    for j in range(self.cols):
+                        if self.lake_h[i,j] < -eps and np.isfinite(self.cmask[i,j]):
+                            nbr = []
+                            if i > 0 and self.lake_h[i-1,j] > -eps and np.isfinite(self.cmask[i-1,j]):
+                                nbr.append(self.Tr1[i-1,j])
+                            if i < self.rows-1 and self.lake_h[i+1,j] > -eps and np.isfinite(self.cmask[i+1,j]):
+                                nbr.append(self.Tr1[i+1,j])
+                            if j > 0 and self.lake_h[i,j-1] > -eps and np.isfinite(self.cmask[i,j-1]):
+                                nbr.append(self.Tr1[i,j-1])
+                            if j < self.cols-1 and self.lake_h[i,j+1] > -eps and np.isfinite(self.cmask[i,j+1]):
+                                nbr.append(self.Tr1[i,j+1])
+                            if nbr:
+                                self.Tr1[i,j] = np.mean(nbr)
+
+            # For Cauchy ditch cells: set Tr to mean of aquifer neighbours
+            if self.ditch_boundary == 'Cauchy':
+                for i in range(self.rows):
+                    for j in range(self.cols):
+                        if self.ditch_h[i,j] < -eps and np.isfinite(self.cmask[i,j]):
+                            nbr = []
+                            if i > 0 and self.ditch_h[i-1,j] > -eps and np.isfinite(self.cmask[i-1,j]):
+                                nbr.append(self.Tr1[i-1,j])
+                            if i < self.rows-1 and self.ditch_h[i+1,j] > -eps and np.isfinite(self.cmask[i+1,j]):
+                                nbr.append(self.Tr1[i+1,j])
+                            if j > 0 and self.ditch_h[i,j-1] > -eps and np.isfinite(self.cmask[i,j-1]):
+                                nbr.append(self.Tr1[i,j-1])
+                            if j < self.cols-1 and self.ditch_h[i,j+1] > -eps and np.isfinite(self.cmask[i,j+1]):
+                                nbr.append(self.Tr1[i,j+1])
+                            if nbr:
+                                self.Tr1[i,j] = np.mean(nbr)
+            
+            TrTmpEW, TrTmpNS = self._interface_transmissivity(self.Tr1)
+            self.TrW1[:,1:] = TrTmpEW
+            self.TrE1[:,:-1] = TrTmpEW
+            self.TrN1[1:,:] = TrTmpNS
+            self.TrS1[:-1,:]=TrTmpNS
+            del TrTmpEW, TrTmpNS
+            # ravel 2D arrays
+            TrW1 = np.ravel(self.TrW1); TrE1= np.ravel(self.TrE1)
+            TrN1 = np.ravel(self.TrN1); TrS1 = np.ravel(self.TrS1)
 
             # differential water capacity dSto/dh
             if not self.z_from_gis:
@@ -882,6 +876,11 @@ class SoilGrid_2Dflow(object):
             # keep the iterate within the tabulated gwl range (see H_floor above)
             Htmp1 = np.maximum(Htmp1, H_floor)
 
+            # Use the undamped Picard residual for convergence and diagnostics.
+            head_diff = np.abs(Htmp1 - Htmp)
+            conv1 = np.max(head_diff)
+            max_index = np.unravel_index(np.argmax(head_diff), (self.rows, self.cols))
+
             # Diagnose cells with large head change before clamping
             large_diff = np.abs(Htmp1 - Htmp) > 0.5
             if np.any(large_diff):
@@ -902,16 +901,9 @@ class SoilGrid_2Dflow(object):
             if self.tmstep > self.spinup_steps:
                 Htmp1 = np.where(np.abs(Htmp1-Htmp)> 0.5, Htmp + 0.5*np.sign(Htmp1-Htmp), Htmp1)
 
-            # damp the update to curb oscillation (no-op when picard_relax == 1.0)
+            # damp the update to stop oscillation (no-op when picard_relax == 1.0)
             if self.picard_relax != 1.0:
                 Htmp1 = Htmp + self.picard_relax * (Htmp1 - Htmp)
-
-            # per-cell head change this iteration (saved for the post-loop non-convergence
-            # diagnostic, since Htmp is overwritten with Htmp1 right below)
-            head_diff = np.abs(Htmp1 - Htmp)
-            conv1 = np.max(head_diff)
-
-            max_index = np.unravel_index(np.argmax(np.abs(Htmp1 - Htmp)),(self.rows,self.cols))
 
             # no iteration-count-based relaxation needed: adaptive sub-stepping now
             # handles the oscillation/stiffness this used to be a workaround for
@@ -1061,7 +1053,7 @@ class SoilGrid_2Dflow(object):
 
             results = {
                     'ground_water_level': h_out,  # [m]
-                    'lateral_netflow': -lateral_flow * 1e3 / dt,  # [mm d-1]
+                    'lateral_netflow': -lateral_flow * 1e3,  # [mm d-1]
                     'netflow_to_ditch': netflow_to_ditch * 1e3 / dt,  # [mm d-1]
                     'netflow_to_lake': netflow_to_lake * 1e3 / dt,  # [mm d-1]
                     'water_closure': mbe * 1e3 / dt,  # [mm d-1]
@@ -1078,13 +1070,10 @@ class SoilGrid_2Dflow(object):
                     }
 
         else:  # Dirichlet: ditches+lakes are constant-head, netflow_to_ditch from mass balance
-            netflow_to_ditch = np.where(self.ditch_h < -eps,
-                                        state0 - self.Wsto_deep - lateral_flow * dt, 0.0)
-            netflow_to_ditch += np.where(self.ditch_h < -eps, Wsto_before_qr - self.Wsto_deep, 0.)
-
-            # mass balance error [m]
             mbe = (state0 - self.Wsto_deep - self.qr - lateral_flow * dt)
-            mbe = np.where(self.ditch_h < -eps, 0.0, mbe)
+            active_boundary = (bc_h_2d < -eps) & (H_neighbours_2d > self.ele + bc_h_2d)
+            netflow_to_ditch = np.where(active_boundary, mbe, 0.0)
+            mbe = mbe - netflow_to_ditch
 
             # outputs multiplied by cmask
             h_out = self.gwl.copy() * self.cmask
@@ -1365,7 +1354,7 @@ def transmissivity(dz, Ksat, gwl):
     Trans = Ksat * dz_sat
 
     # sum over layers
-    Tr = np.maximum(sum(Trans), 1e-4 / 86400)
+    Tr = np.maximum(sum(Trans), 1e-5 / 86400)
 
     return Tr #* connectivity_scalar_exp(gwl)
 
