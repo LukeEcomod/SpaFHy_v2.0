@@ -19,8 +19,8 @@ load_dotenv()
 SOIL_TYPE = 'Medium'
 DEFAULT_N_SAMPLES = 10_000
 DEFAULT_SEED = 42
-F_BOUNDS = (6.0, 24.0)
-KMAX_BOUNDS = (1e-5, 0.1)
+F_BOUNDS = (5.0, 20.0)
+KMAX_BOUNDS = (1e-4, 0.01)
 
 WORKER_CONTEXT = {}
 
