@@ -38,8 +38,8 @@ kPa_to_cm = 1.0 / (100.0 / 9.81)   # = 0.09810
 _DEFAULT_KMAX = {
     'Bedrock':  1e-6,
     'Peat':     1e-3,
-    'Silt':      1e-4,
-    'Till':      9e-3,
+    'Silt':     1e-4,
+    'Till':     1e-2,
     'Sand':     1e-3,
 }
 
@@ -68,11 +68,11 @@ _MAX_DEPTH = {
 }
 
 _CONST_SURF_KMAX = {             # depth [m] over which Ksat is held constant at Kmax before exponential decay
-    'Bedrock':  0.1,
+    'Bedrock':  0.2,
     'Peat':     0.2,
-    'Silt':      0.3,
+    'Silt':     0.5,
     'Till':     0.5,
-    'Sand':     0.3,
+    'Sand':     0.5,
 }
 
 # van Genuchten / ThetaS – Sources:
