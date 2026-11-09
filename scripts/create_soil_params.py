@@ -36,98 +36,98 @@ kPa_to_cm = 1.0 / (100.0 / 9.81)   # = 0.09810
 # ── Default parameters (override via function arguments during calibration) ────
 
 _DEFAULT_KMAX = {
-    'Bedrock':  1e-5,
+    'Bedrock':  1e-6,
     'Peat':     1e-3,
-    'Fine':     1e-4,
-    'Medium':   1e-2,
-    'Coarse':   1e-3,
+    'Silt':      1e-4,
+    'Till':      9e-3,
+    'Sand':     1e-3,
 }
 
 _DEFAULT_F = {                  # Ksat decay coefficient [m-1]
-    'Bedrock':  15.0,
+    'Bedrock':  10.0,
     'Peat':     6.0,
-    'Fine':     4.0,
-    'Medium':   20.0,
-    'Coarse':   1.5,
+    'Silt':      4.0,
+    'Till':      7.3,
+    'Sand':     1.5,
 }
 
 _KMIN = {
     'Bedrock':  1e-9,
     'Peat':     1e-9,
-    'Fine':     1e-9,
-    'Medium':   1e-9,
-    'Coarse':   1e-9,
+    'Silt':      1e-9,
+    'Till':      1e-9,
+    'Sand':     1e-9,
 }
 
 _MAX_DEPTH = {
     'Bedrock':  15.0,
     'Peat':     15.0,
-    'Fine':     15.0,
-    'Medium':   15.0,
-    'Coarse':   15.0,
+    'Silt':      15.0,
+    'Till':      15.0,
+    'Sand':     15.0,
 }
 
 _CONST_SURF_KMAX = {             # depth [m] over which Ksat is held constant at Kmax before exponential decay
     'Bedrock':  0.1,
     'Peat':     0.2,
-    'Fine':     0.3,
-    'Medium':   0.3,
-    'Coarse':   0.3,
+    'Silt':      0.3,
+    'Till':      0.3,
+    'Sand':     0.3,
 }
 
 # van Genuchten / ThetaS – Sources:
 #   Bedrock – assumed
 #   Peat    – Leppä et al. 2020, Sphagnum
-#   Fine    – Launiainen et al. 2022, C3
-#   Medium  – Launiainen et al. 2022, C5
-#   Coarse  – Launiainen et al. 2022, C4
+#   Silt    – Launiainen et al. 2022, C3
+#   Till    – Launiainen et al. 2022, C5
+#   Sand    – Launiainen et al. 2022, C4
 
 _THETAS_MAX = {
     'Bedrock':  0.20,
     'Peat':     0.89,
-    'Fine':     0.46,
-    'Medium':   0.54,
-    'Coarse':   0.47,
+    'Silt':      0.46,
+    'Till':      0.54,
+    'Sand':     0.47,
 }
 
 _THETAS_MIN = {
     'Bedrock':  0.10,
     'Peat':     0.70,
-    'Fine':     0.2,
-    'Medium':   0.25,
-    'Coarse':   0.25,
+    'Silt':      0.2,
+    'Till':      0.25,
+    'Sand':     0.25,
 }
 
 _F_THETA = {
     'Bedrock':  1.0,
     'Peat':     1.0,
-    'Fine':     1.0,
-    'Medium':   1.0,
-    'Coarse':   1.0,
+    'Silt':      1.0,
+    'Till':      1.0,
+    'Sand':     1.0,
 }
 
 _PF_ALPHA = {                   # cm-1 (converted from kPa-1 where noted)
     'Bedrock': 0.024,
     'Peat':    0.07,
-    'Fine':    2.02 * kPa_to_cm,
-    'Medium':  3.35 * kPa_to_cm,
-    'Coarse':  4.49 * kPa_to_cm,
+    'Silt':    2.02 * kPa_to_cm,
+    'Till':    3.35 * kPa_to_cm,
+    'Sand':    4.49 * kPa_to_cm,
 }
 
 _PF_N = {
     'Bedrock': 1.20,
     'Peat':    1.37,
-    'Fine':    1.07,
-    'Medium':  1.18,
-    'Coarse':  1.27,
+    'Silt':    1.07,
+    'Till':    1.18,
+    'Sand':    1.27,
 }
 
 _PF_WR = {
     'Bedrock': 0.0,
     'Peat':    0.098,
-    'Fine':    0.0,
-    'Medium':  0.0,
-    'Coarse':  0.0,
+    'Silt':    0.0,
+    'Till':    0.0,
+    'Sand':    0.0,
 }
 
 
@@ -203,25 +203,25 @@ def create_soil_params(
     org_properties = {
         'Bedrock': {'org_id': 1, 'org_depth': 0.05, 'org_poros': 0.9, 'org_fc': None, 'org_rw': 0.11, 'org_ksat': vertical_ksat_factor * kmax['Bedrock'], 'org_beta': 6.0},
         'Peat':    {'org_id': 2, 'org_depth': 0.05, 'org_poros': 0.9, 'org_fc': None, 'org_rw': 0.11, 'org_ksat': vertical_ksat_factor * kmax['Peat'],    'org_beta': 6.0},
-        'Fine':    {'org_id': 3, 'org_depth': 0.05, 'org_poros': 0.9, 'org_fc': None, 'org_rw': 0.11, 'org_ksat': vertical_ksat_factor * kmax['Fine'],    'org_beta': 6.0},
-        'Medium':  {'org_id': 4, 'org_depth': 0.05, 'org_poros': 0.9, 'org_fc': None, 'org_rw': 0.11, 'org_ksat': vertical_ksat_factor * kmax['Medium'],  'org_beta': 6.0},
-        'Coarse':  {'org_id': 5, 'org_depth': 0.05, 'org_poros': 0.9, 'org_fc': None, 'org_rw': 0.11, 'org_ksat': vertical_ksat_factor * kmax['Coarse'],  'org_beta': 6.0},
+        'Silt':    {'org_id': 3, 'org_depth': 0.05, 'org_poros': 0.9, 'org_fc': None, 'org_rw': 0.11, 'org_ksat': vertical_ksat_factor * kmax['Silt'],    'org_beta': 6.0},
+        'Till':    {'org_id': 4, 'org_depth': 0.05, 'org_poros': 0.9, 'org_fc': None, 'org_rw': 0.11, 'org_ksat': vertical_ksat_factor * kmax['Till'],  'org_beta': 6.0},
+        'Sand':    {'org_id': 5, 'org_depth': 0.05, 'org_poros': 0.9, 'org_fc': None, 'org_rw': 0.11, 'org_ksat': vertical_ksat_factor * kmax['Sand'],  'org_beta': 6.0},
     }
 
     root_properties = {
         'Bedrock': {'root_id': 1, 'root_poros': _THETAS_MAX['Bedrock'], 'root_fc': None, 'root_wp': None, 'root_ksat': vertical_ksat_factor * kmax['Bedrock'], 'root_beta': 4.0, 'root_alpha': _PF_ALPHA['Bedrock'], 'root_n': _PF_N['Bedrock'], 'root_wr': _PF_WR['Bedrock'], 'root_depth': 0.3},
         'Peat':    {'root_id': 2, 'root_poros': _THETAS_MAX['Peat'],    'root_fc': None, 'root_wp': None, 'root_ksat': vertical_ksat_factor * kmax['Peat'],    'root_beta': 4.0, 'root_alpha': _PF_ALPHA['Peat'],    'root_n': _PF_N['Peat'],    'root_wr': _PF_WR['Peat'],    'root_depth': 0.3},
-        'Fine':    {'root_id': 3, 'root_poros': _THETAS_MAX['Fine'],    'root_fc': None, 'root_wp': None, 'root_ksat': vertical_ksat_factor * kmax['Fine'],    'root_beta': 4.0, 'root_alpha': _PF_ALPHA['Fine'],    'root_n': _PF_N['Fine'],    'root_wr': _PF_WR['Fine'],    'root_depth': 0.3},
-        'Medium':  {'root_id': 4, 'root_poros': _THETAS_MAX['Medium'],  'root_fc': None, 'root_wp': None, 'root_ksat': vertical_ksat_factor * kmax['Medium'],  'root_beta': 4.0, 'root_alpha': _PF_ALPHA['Medium'],  'root_n': _PF_N['Medium'],  'root_wr': _PF_WR['Medium'],  'root_depth': 0.3},
-        'Coarse':  {'root_id': 5, 'root_poros': _THETAS_MAX['Coarse'],  'root_fc': None, 'root_wp': None, 'root_ksat': vertical_ksat_factor * kmax['Coarse'],  'root_beta': 4.0, 'root_alpha': _PF_ALPHA['Coarse'],  'root_n': _PF_N['Coarse'],  'root_wr': _PF_WR['Coarse'],  'root_depth': 0.3},
+        'Silt':    {'root_id': 3, 'root_poros': _THETAS_MAX['Silt'],    'root_fc': None, 'root_wp': None, 'root_ksat': vertical_ksat_factor * kmax['Silt'],    'root_beta': 4.0, 'root_alpha': _PF_ALPHA['Silt'],    'root_n': _PF_N['Silt'],    'root_wr': _PF_WR['Silt'],    'root_depth': 0.3},
+        'Till':    {'root_id': 4, 'root_poros': _THETAS_MAX['Till'],  'root_fc': None, 'root_wp': None, 'root_ksat': vertical_ksat_factor * kmax['Till'],  'root_beta': 4.0, 'root_alpha': _PF_ALPHA['Till'],  'root_n': _PF_N['Till'],  'root_wr': _PF_WR['Till'],  'root_depth': 0.3},
+        'Sand':    {'root_id': 5, 'root_poros': _THETAS_MAX['Sand'],  'root_fc': None, 'root_wp': None, 'root_ksat': vertical_ksat_factor * kmax['Sand'],  'root_beta': 4.0, 'root_alpha': _PF_ALPHA['Sand'],  'root_n': _PF_N['Sand'],  'root_wr': _PF_WR['Sand'],  'root_depth': 0.3},
     }
 
     deep_properties = {
         'Bedrock': {'deep_id': 1, 'deep_z': [-10.0], 'pF': {'ThetaS': [_THETAS_MAX['Bedrock']], 'ThetaR': [_PF_WR['Bedrock']], 'alpha': [_PF_ALPHA['Bedrock']], 'n': [_PF_N['Bedrock']]}, 'deep_ksat': None},
         'Peat':    {'deep_id': 2, 'deep_z': [-10.0], 'pF': {'ThetaS': [_THETAS_MAX['Peat']],    'ThetaR': [_PF_WR['Peat']],    'alpha': [_PF_ALPHA['Peat']],    'n': [_PF_N['Peat']]},    'deep_ksat': None},
-        'Fine':    {'deep_id': 3, 'deep_z': [-10.0], 'pF': {'ThetaS': [_THETAS_MAX['Fine']],    'ThetaR': [_PF_WR['Fine']],    'alpha': [_PF_ALPHA['Fine']],    'n': [_PF_N['Fine']]},    'deep_ksat': None},
-        'Medium':  {'deep_id': 4, 'deep_z': [-10.0], 'pF': {'ThetaS': [_THETAS_MAX['Medium']],  'ThetaR': [_PF_WR['Medium']],  'alpha': [_PF_ALPHA['Medium']],  'n': [_PF_N['Medium']]},  'deep_ksat': None},
-        'Coarse':  {'deep_id': 5, 'deep_z': [-10.0], 'pF': {'ThetaS': [_THETAS_MAX['Coarse']],  'ThetaR': [_PF_WR['Coarse']],  'alpha': [_PF_ALPHA['Coarse']],  'n': [_PF_N['Coarse']]},  'deep_ksat': None},
+        'Silt':    {'deep_id': 3, 'deep_z': [-10.0], 'pF': {'ThetaS': [_THETAS_MAX['Silt']],    'ThetaR': [_PF_WR['Silt']],    'alpha': [_PF_ALPHA['Silt']],    'n': [_PF_N['Silt']]},    'deep_ksat': None},
+        'Till':    {'deep_id': 4, 'deep_z': [-10.0], 'pF': {'ThetaS': [_THETAS_MAX['Till']],  'ThetaR': [_PF_WR['Till']],  'alpha': [_PF_ALPHA['Till']],  'n': [_PF_N['Till']]},  'deep_ksat': None},
+        'Sand':    {'deep_id': 5, 'deep_z': [-10.0], 'pF': {'ThetaS': [_THETAS_MAX['Sand']],  'ThetaR': [_PF_WR['Sand']],  'alpha': [_PF_ALPHA['Sand']],  'n': [_PF_N['Sand']]},  'deep_ksat': None},
     }
 
     # ── Build exp_params ───────────────────────────────────────────────────────

@@ -33,18 +33,18 @@ if __name__ == '__main__':
     soil_type = 'Medium'
 
     # f values for calibration
-    f_range = np.array([12., 16., 20., 24.]) # up to crazy range
-    #f_range = np.array([20.]) # small test
+    #f_range = np.array([12., 16., 20., 24.]) # up to crazy range
+    f_range = np.array([20.]) # small test
 
     # kmax values for calibration
-    kmax_range = np.array([1e-4, 1e-3, 1e-2]) # up to crazy range
+    #kmax_range = np.array([1e-4, 1e-3, 1e-2]) # up to crazy range
     #kmax_range = np.array([1e-5, 1e-4]) # up to crazy range
-    #kmax_range = np.array([1e-5]) # small test
+    kmax_range = np.array([1e-2]) # small test
 
-    kmax_depth = np.array([0.0, 0.3, 0.6])
-    #kmax_depth = np.array([0.6]) # small test
+    #kmax_depth = np.array([0.0, 0.3, 0.6])
+    kmax_depth = np.array([0.3]) # small test
 
-    max_depth = np.array([10.])
+    max_depth = np.array([15.])
 
     # kmin values for calibration
     kmin_range = np.array([1e-9])
