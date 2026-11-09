@@ -23,7 +23,7 @@ if __name__ == '__main__':
 
     ### CALIBRATION SETUP ###
     # soil type to calibrate (add more blocks below for additional soil types)
-    soil_type = 'Medium'
+    soil_type = 'Till'
     # f values for calibration
     f_range = np.array([6., 8., 12., 14., 16.]) # up to crazy range
     #f_range = np.array([2., 4., 6., 8., 10., 12.]) # reasonable range

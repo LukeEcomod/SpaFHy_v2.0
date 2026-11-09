@@ -68,7 +68,7 @@ def run_single_simulation(
         catchment: Catchment name (e.g. 'krycklan')
         catchment_no: Catchment number
         q_obs: Observed discharge Series
-        soil_type: Soil type name (e.g. 'Medium')
+        soil_type: Soil type name (e.g. 'Till')
         create_ncf: Whether to create netcdf output
         
     Returns:
@@ -188,7 +188,7 @@ def run_batch_simulations(
     save_ncf=False,
     catchment='krycklan',
     catchment_no=2,
-    soil_type='Medium',
+    soil_type='Till',
     skip_existing=True,
     verbose=True,
 ):
@@ -297,8 +297,8 @@ def parse_args():
     )
     parser.add_argument(
         '--soil-type',
-        default='Medium',
-        help='Soil type to extract from the GLUE result columns (default: Medium)',
+        default='Till',
+        help='Soil type to extract from the GLUE result columns (default: Till)',
     )
     return parser.parse_args()
 

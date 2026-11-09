@@ -16,7 +16,7 @@ from scripts.create_soil_params import _KMIN, create_soil_params
 
 load_dotenv()
 
-SOIL_TYPE = 'Medium'
+SOIL_TYPE = 'Till'
 DEFAULT_N_SAMPLES = 10_000
 DEFAULT_SEED = 42
 F_BOUNDS = (5.0, 20.0)
