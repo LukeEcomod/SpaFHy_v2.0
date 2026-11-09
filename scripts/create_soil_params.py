@@ -71,7 +71,7 @@ _CONST_SURF_KMAX = {             # depth [m] over which Ksat is held constant at
     'Bedrock':  0.1,
     'Peat':     0.2,
     'Silt':      0.3,
-    'Till':      0.3,
+    'Till':     0.5,
     'Sand':     0.3,
 }
 
