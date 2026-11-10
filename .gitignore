@@ -129,6 +129,11 @@ sand*.ipynb
 
 # files
 *.sh
+!run_parallel_krycklan.slurm.sh
+!run_parallel_krycklan_small.slurm.sh
+!run_parallel_krycklan_medium.slurm.sh
+!run_parallel_krycklan_large.slurm.sh
+!submit_parallel_krycklan.sh
 *.out
 *.err
 *.prj

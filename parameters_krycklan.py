@@ -9,9 +9,12 @@ import os
 import time
 from datetime import datetime
 
-reso = 20
-streams = 'channels'
-#streams = '5haStreams'
+reso = int(os.getenv('SPAFHY_RESOLUTION', '20'))
+if reso <= 0:
+    raise ValueError('SPAFHY_RESOLUTION must be a positive integer')
+streams = os.getenv('SPAFHY_STREAMS', 'channels')
+if not streams:
+    raise ValueError('SPAFHY_STREAMS must not be empty')
 results_run = os.getenv('SPAFHY_RESULTS_RUN', 'run_9_2026')
 
 
@@ -530,4 +533,3 @@ def org_properties():
             },
         }
     return orgp
-
