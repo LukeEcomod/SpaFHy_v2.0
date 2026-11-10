@@ -57,10 +57,10 @@ def parameters(folder='', soil_params=None):
 
     pgen = {'description': 'final_run',  # description written in result file
             'simtype': '2D', # 1D, TOP, 2D,
-            'start_date': '2014-10-01', # 2013-01-01 full run
-            'end_date': '2015-10-01', # 2018-12-31 full run
+            'start_date': '2013-01-01', # 2013-01-01 full run
+            'end_date': '2024-01-01', # 2018-12-31 full run
             #'spinup_file': r'F:\SpaFHy_2D_2021/testcase_input_202304051037_spinup.nc',
-            'spinup_end': '2015-04-01',  # 2014-09-01 full run
+            'spinup_end': '2014-08-31',  # 2014-09-01 full run
             'dt': 86400.0,
             'spatial_cpy': True,  # if False uses parameters from cpy['state']
             # else needs cf.dat, hc.dat, LAI_decid.dat, LAI_spruce.dat, LAI_pine.dat, (cmask.dat)
