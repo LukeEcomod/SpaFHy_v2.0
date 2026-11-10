@@ -97,6 +97,11 @@ to every task in that array.
 | Medium | 8, 9, 12, 13, 20, 21 | 6 | 16 GB | 4 hours |
 | Large | 141, 142, 143, 151, 152, 153, 161, 162, 163, 164, 22, 10 | 12 | 64 GB | 32 hours |
 
+Catchment 3 is excluded from the small group at 160 m for both stream
+definitions. It remains in the small group at 20, 40 and 80 m. This exclusion
+also applies when submitting the small group individually at 160 m; it does
+not apply to direct Python runs or direct submissions of the shared script.
+
 All three request one node, account `project_2000908`, and partition `small`.
 The medium script also sets `HDF5_USE_FILE_LOCKING=FALSE`. Check that these
 requests and the account are appropriate for the current Roihu configuration.

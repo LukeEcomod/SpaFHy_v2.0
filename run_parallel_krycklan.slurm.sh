@@ -18,6 +18,7 @@ mkdir -p "$RUN_ROOT/logs"
 array_mode="${SPAFHY_KRYCKLAN_ARRAY:-0}"
 array_task_id="${SLURM_ARRAY_TASK_ID:-}"
 selected_catchments="${CATCHMENT_NOS:-}"
+small_group="${SPAFHY_KRYCKLAN_SMALL_GROUP:-0}"
 
 if [[ -f "$RUN_ROOT/.env" ]]; then
     set -a
@@ -70,6 +71,29 @@ case "$RUN_MODE" in
         exit 1
         ;;
 esac
+
+resolution="${SPAFHY_RESOLUTION-20}"
+resolution="${resolution//_/}"
+resolution="${resolution//[[:space:]]/}"
+if [[ "$small_group" == "1" && "$resolution" =~ ^[+]?0*160$ ]]; then
+    if [[ "$RUN_MODE" != "subset" ]]; then
+        echo "The 160 m small group requires RUN_MODE=subset to exclude catchment 3" >&2
+        exit 1
+    fi
+    filtered_args=(--catchment-nos)
+    for catchment in "${CASE_ARGS[@]:1}"; do
+        if [[ "$catchment" =~ ^[+]?0*3$ ]]; then
+            echo "Skipping catchment 3 for the 160 m small group"
+        else
+            filtered_args+=("$catchment")
+        fi
+    done
+    if [[ ${#filtered_args[@]} -eq 1 ]]; then
+        echo "No catchments remain in the 160 m small group" >&2
+        exit 1
+    fi
+    CASE_ARGS=("${filtered_args[@]}")
+fi
 
 if [[ -f "$SPAFHY_FOLDER/.venv/bin/activate" ]]; then
     # Use the repository virtual environment when present.

@@ -16,5 +16,6 @@ RUN_ROOT="$(cd "$RUN_ROOT" && pwd)"
 
 export RUN_MODE="subset"
 export CATCHMENT_NOS="1 2 3 4 5 6 7"
+export SPAFHY_KRYCKLAN_SMALL_GROUP=1
 
 bash "$RUN_ROOT/run_parallel_krycklan.slurm.sh"

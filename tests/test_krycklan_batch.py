@@ -86,7 +86,7 @@ class KrycklanBatchTest(unittest.TestCase):
         for key in (
             'SPAFHY_FOLDER', 'SPAFHY_KRYCKLAN_ARRAY', 'SLURM_ARRAY_TASK_ID',
             'SPAFHY_RESOLUTION', 'SPAFHY_STREAMS', 'RUN_MODE', 'CATCHMENT_NOS',
-            'HDF5_USE_FILE_LOCKING',
+            'HDF5_USE_FILE_LOCKING', 'SPAFHY_KRYCKLAN_SMALL_GROUP',
         ):
             self.env.pop(key, None)
         self.env.update({
@@ -153,7 +153,7 @@ class KrycklanBatchTest(unittest.TestCase):
     def test_array_combinations_and_catchments_override_dotenv(self):
         (self.root / '.env').write_text(
             'SPAFHY_RESOLUTION=999\nSPAFHY_STREAMS=wrong\n'
-            'RUN_MODE=all\nCATCHMENT_NOS=999\n'
+            'RUN_MODE=all\nCATCHMENT_NOS=999\nSPAFHY_KRYCKLAN_SMALL_GROUP=0\n'
         )
         self.executable('python', 'printf "CONFIG=%s,%s ARGS=%s\\n" "$SPAFHY_RESOLUTION" "$SPAFHY_STREAMS" "$*"\n')
         self.env['SPAFHY_KRYCKLAN_ARRAY'] = '1'
@@ -169,8 +169,57 @@ class KrycklanBatchTest(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
                     resolution = (20, 40, 80, 160)[task % 4]
                     streams = ('channels', '5haStreams')[task // 4]
+                    expected_catchments = catchments
+                    if size == 'small' and resolution == 160:
+                        expected_catchments = '1 2 4 5 6 7'
                     self.assertIn(f'CONFIG={resolution},{streams}', result.stdout)
-                    self.assertIn(f'--catchment-nos {catchments} --n-workers {workers}', result.stdout)
+                    self.assertIn(f'--catchment-nos {expected_catchments} --n-workers {workers}', result.stdout)
+
+    def test_individual_small_group_excludes_catchment_3_at_160m(self):
+        self.executable('python', 'printf "ARGS=%s\\n" "$*"\n')
+        for streams in ('channels', '5haStreams'):
+            with self.subTest(streams=streams):
+                (self.root / '.env').write_text(
+                    f'SPAFHY_RESOLUTION=160\nSPAFHY_STREAMS={streams}\n'
+                )
+                result = subprocess.run(
+                    ['bash', str(self.root / 'run_parallel_krycklan_small.slurm.sh')],
+                    env=self.env, text=True, capture_output=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('--catchment-nos 1 2 4 5 6 7', result.stdout)
+                self.assertIn('Skipping catchment 3', result.stdout)
+
+    def test_individual_small_group_uses_exported_resolution(self):
+        self.env['SPAFHY_RESOLUTION'] = '+01_60'
+        self.executable('python', 'printf "ARGS=%s\\n" "$*"\n')
+        result = subprocess.run(
+            ['bash', str(self.root / 'run_parallel_krycklan_small.slurm.sh')],
+            env=self.env, text=True, capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--catchment-nos 1 2 4 5 6 7', result.stdout)
+
+    def test_empty_small_group_after_exclusion_fails(self):
+        self.env.update(
+            SPAFHY_KRYCKLAN_SMALL_GROUP='1', SPAFHY_RESOLUTION='160',
+            RUN_MODE='subset', CATCHMENT_NOS='3',
+        )
+        result = subprocess.run(
+            ['bash', str(self.root / 'run_parallel_krycklan.slurm.sh')],
+            env=self.env, text=True, capture_output=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('No catchments remain', result.stderr)
+
+    def test_160m_small_group_rejects_non_subset_mode(self):
+        (self.root / '.env').write_text('SPAFHY_RESOLUTION=160\nRUN_MODE=all\n')
+        result = subprocess.run(
+            ['bash', str(self.root / 'run_parallel_krycklan_small.slurm.sh')],
+            env=self.env, text=True, capture_output=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('requires RUN_MODE=subset', result.stderr)
 
     def test_individual_job_does_not_enable_array_mapping(self):
         (self.root / '.env').write_text('SPAFHY_RESOLUTION=80\nSPAFHY_STREAMS=channels\n')
