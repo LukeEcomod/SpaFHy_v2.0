@@ -1726,6 +1726,8 @@ def stitch_result_nc_files(root_directory, output_file, plot=False, start_date=N
     # Step 1: Find global latitudes, longitudes, time, and variables
     print('checking global lats and lons')
     latitudes, longitudes, time, variables = find_global_lats_lons(root_directory)
+    if len(time) == 0:
+        raise ValueError(f'No time steps found in the selected date range: {start_date} to {end_date}')
     print('found global lats and lons')
 
     # Step 2: Create the new NetCDF file
@@ -1804,7 +1806,7 @@ def stitch_result_nc_files(root_directory, output_file, plot=False, start_date=N
                             # Fill values in new_ds with values from aligned_result_ds where not NaN
                             new_ds[var] = xr.where(np.isnan(new_ds[var]), masked_result_ds, new_ds[var])
                         except Exception as e:
-                            print(f"Error processing variable '{var}' in file '{result_path}': {e}")
+                            raise RuntimeError(f"Error processing variable '{var}' in file '{result_path}'") from e
                         if (var == 'bucket_moisture_root') & (plot == True):
                             masked_result_ds[-1].plot(vmin=0, vmax=1)
                 print('exited the fill loop')

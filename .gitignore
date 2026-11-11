@@ -134,6 +134,7 @@ sand*.ipynb
 !run_parallel_krycklan_medium.slurm.sh
 !run_parallel_krycklan_large.slurm.sh
 !submit_parallel_krycklan.sh
+!stitch_krycklan.slurm.sh
 *.out
 *.err
 *.prj

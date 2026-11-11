@@ -178,3 +178,67 @@ SPAFHY_RESOLUTION=40 SPAFHY_STREAMS=5haStreams \
 Set `PROJECT_FOLDER` and, if needed, `SPAFHY_RESULTS_FOLDER` for the local
 environment as well. The Python entry point accepts `--help` for the available
 catchment and output options.
+
+## Stitching subcatchment results
+
+After the simulation jobs have **completed successfully**, the stitching
+array combines the subcatchment NetCDF files into one file per configuration.
+Transfer `stitch_krycklan.py`, `stitch_krycklan.slurm.sh` and the current
+`iotools.py` to Roihu. From the repository directory:
+
+```bash
+mkdir -p logs
+sbatch stitch_krycklan.slurm.sh
+```
+
+This submits one eight-task array using the same task mapping as above. Each
+task works on one resolution/stream combination. The script uses the same
+`python-data` module and optional repository `.venv` as the simulation jobs.
+It does not wait for simulations automatically.
+
+By default, the input run directory is
+`$SPAFHY_RESULTS_FOLDER/krycklan/$SPAFHY_RESULTS_RUN`, matching the simulation
+output settings. `SPAFHY_RESULTS_RUN` defaults to `run_9_2026`. The notebook's
+older directory layout includes an extra `results` component; pass `--run-dir`
+if that is where the data actually are:
+
+```bash
+sbatch stitch_krycklan.slurm.sh --run-dir /path/to/SpaFHy_RESULTS/krycklan/results/run_9_2026
+```
+
+For each task the input is `<run-dir>/<streams>_<resolution>m/`, searched
+recursively for **all** `.nc` files. Ensure it contains only the intended
+subcatchment results: duplicate runs, spinup files, or partial results may
+produce an incorrect merge. The stitcher does not verify that all expected
+catchments are present. Catchment 3 is absent from 160 m simulation output.
+The output is `<run-dir>/stitched/<streams>_<resolution>m.nc`. Existing output
+files are never overwritten: move or rename them before rerunning a task.
+
+The default time slice is the notebook's **2015-04-01 through 2015-09-01**,
+inclusive. Override it by passing both dates, for example:
+
+```bash
+sbatch stitch_krycklan.slurm.sh --start-date 2015-05-01 --end-date 2015-08-31
+```
+
+The batch script requests one CPU, 64 GB and 32 hours per task on the `small`
+partition. These are starting values, not measured requirements: the existing
+stitcher allocates full-domain arrays and fine resolutions may need much more
+memory or time. Check `sacct` and adjust with Slurm options where appropriate,
+for example `sbatch --mem=128G --time=48:00:00 stitch_krycklan.slurm.sh`,
+subject to Roihu's partition limits. To limit concurrent tasks, submit with
+`sbatch --array=0-7%2 stitch_krycklan.slurm.sh`; to rerun only specific tasks,
+use e.g. `sbatch --array=3,7 stitch_krycklan.slurm.sh`.
+
+Check `squeue`, `sacct`, and `logs/stitch-krycklan-<array-job-id>_<task-id>.out`
+and `.err` for completion and errors. Tasks use separate temporary directories
+under `stitched/` to prevent collisions, and publish the final output only after
+the stitcher succeeds. A forcibly terminated job may leave a hidden
+`.stitch-...` temporary directory; inspect and remove that task's directory
+after confirming it is no longer running.
+
+The Python script can also stitch one configuration locally:
+
+```bash
+python stitch_krycklan.py --resolution 20 --streams channels --run-dir /path/to/run
+```

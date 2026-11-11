@@ -68,11 +68,11 @@ _MAX_DEPTH = {
 }
 
 _CONST_SURF_KMAX = {             # depth [m] over which Ksat is held constant at Kmax before exponential decay
-    'Bedrock':  0.2,
-    'Peat':     0.2,
-    'Silt':     0.5,
-    'Till':     0.5,
-    'Sand':     0.5,
+    'Bedrock':  0.1,
+    'Peat':     0.1,
+    'Silt':     0.3,
+    'Till':     0.3,
+    'Sand':     0.3,
 }
 
 # van Genuchten / ThetaS – Sources:
