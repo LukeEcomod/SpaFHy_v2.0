@@ -68,9 +68,6 @@ def main():
         raise FileNotFoundError(f'Input directory does not exist: {input_dir}')
     if not any(input_dir.rglob('*.nc')):
         raise FileNotFoundError(f'No NetCDF files found in {input_dir}')
-    if output_file.exists():
-        raise FileExistsError(f'Output already exists; move it before rerunning: {output_file}')
-
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f'Configuration: {configuration}', flush=True)
     print(f'Input: {input_dir}', flush=True)
@@ -85,7 +82,7 @@ def main():
             str(input_dir), str(staged_output), plot=False,
             start_date=args.start_date.isoformat(), end_date=args.end_date.isoformat(),
         )
-        os.link(staged_output, output_file)
+        os.replace(staged_output, output_file)
     print(f'Stitched output: {output_file}', flush=True)
 
 

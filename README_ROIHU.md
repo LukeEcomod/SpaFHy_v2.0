@@ -212,7 +212,10 @@ subcatchment results: duplicate runs, spinup files, or partial results may
 produce an incorrect merge. The stitcher does not verify that all expected
 catchments are present. Catchment 3 is absent from 160 m simulation output.
 The output is `<run-dir>/stitched/<streams>_<resolution>m.nc`. Existing output
-files are never overwritten: move or rename them before rerunning a task.
+files are replaced after a successful stitch; a failed stitch leaves the
+previous output intact. If multiple tasks target the same output concurrently,
+the last successful task to finish replaces the others. Avoid submitting
+overlapping tasks when their inputs or date ranges differ.
 
 The default time slice is the notebook's **2015-04-01 through 2015-09-01**,
 inclusive. Override it by passing both dates, for example:

@@ -45,7 +45,7 @@ class StitchKrycklanTest(unittest.TestCase):
             )
             ds.to_netcdf(folder / 'result.nc')
 
-    def test_real_stitch_and_existing_output_protection(self):
+    def test_real_stitch_replaces_existing_output(self):
         self.create_inputs()
         args = (
             '--array-task-id', '0', '--run-dir', str(self.root),
@@ -58,11 +58,16 @@ class StitchKrycklanTest(unittest.TestCase):
             self.assertEqual(ds.sizes, {'time': 2, 'lat': 2, 'lon': 4})
             np.testing.assert_array_equal(ds.flow.values[:, :, :2], 1)
             np.testing.assert_array_equal(ds.flow.values[:, :, 2:], 2)
-        original = output.read_bytes()
-        result = self.run_stitch(*args)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('Output already exists', result.stderr)
-        self.assertEqual(output.read_bytes(), original)
+        result = self.run_stitch(
+            '--array-task-id', '0', '--run-dir', str(self.root),
+            '--start-date', '2015-04-02', '--end-date', '2015-04-02',
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with xr.open_dataset(output) as ds:
+            self.assertEqual(ds.sizes['time'], 1)
+            self.assertEqual(ds.time.values[0], np.datetime64('2015-04-02'))
+            np.testing.assert_array_equal(ds.flow.values[:, :, :2], 1)
+            np.testing.assert_array_equal(ds.flow.values[:, :, 2:], 2)
         self.assertEqual(list((self.root / 'stitched').glob('.stitch-*')), [])
 
     def test_parallel_tasks_do_not_share_temporary_files(self):
@@ -99,12 +104,15 @@ class StitchKrycklanTest(unittest.TestCase):
 
     def test_processing_failure_does_not_publish_output(self):
         self.create_inputs()
+        output = self.root / 'stitched' / 'channels_20m.nc'
+        output.parent.mkdir()
+        output.write_bytes(b'previous result')
         args = ['stitch_krycklan.py', '--array-task-id', '0', '--run-dir', str(self.root)]
         with mock.patch.object(sys, 'argv', args), \
              mock.patch.object(xr, 'where', side_effect=ValueError('bad data')):
             with self.assertRaisesRegex(RuntimeError, 'Error processing variable'):
                 stitch_krycklan.main()
-        self.assertFalse((self.root / 'stitched' / 'channels_20m.nc').exists())
+        self.assertEqual(output.read_bytes(), b'previous result')
         self.assertEqual(list((self.root / 'stitched').glob('.stitch-*')), [])
 
     def test_array_mapping_and_default_paths(self):
