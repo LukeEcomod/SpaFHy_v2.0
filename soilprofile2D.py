@@ -41,6 +41,10 @@ class SoilGrid_2Dflow(object):
         0.0 — explicit (forward Euler)
         1.0 — implicit (backward Euler)
         0.5 — Crank-Nicolson (default; most stable near impermeable bottom)
+
+    In Cauchy mode, ditch cells use their own groundwater-dependent
+    transmissivity at or below ditch level and the mean of eligible neighbours
+    above it. This also affects lateral flow and rewetting near the threshold.
     """
     def __init__(self, spara):
         """
@@ -651,11 +655,13 @@ class SoilGrid_2Dflow(object):
                         if nbr:
                             self.Tr0[i,j] = np.mean(nbr)
 
-        # For Cauchy ditch cells: set Tr to mean of aquifer neighbours
+        # Above ditch level, use the mean transmissivity of aquifer neighbours.
+        # Below it, retain the cell's own groundwater-dependent transmissivity.
         if self.ditch_boundary == 'Cauchy':
             for i in range(self.rows):
                 for j in range(self.cols):
-                    if self.ditch_h[i,j] < -eps and np.isfinite(self.cmask[i,j]):
+                    if (self.ditch_h[i,j] < -eps and np.isfinite(self.cmask[i,j])
+                            and self.H[i,j] > self.ele[i,j] + self.ditch_h[i,j]):
                         nbr = []
                         if i > 0 and self.ditch_h[i-1,j] > -eps and np.isfinite(self.cmask[i-1,j]):
                             nbr.append(self.Tr0[i-1,j])
@@ -764,11 +770,12 @@ class SoilGrid_2Dflow(object):
                             if nbr:
                                 self.Tr1[i,j] = np.mean(nbr)
 
-            # For Cauchy ditch cells: set Tr to mean of aquifer neighbours
+            # Apply the same ditch-level condition to the current iterate.
             if self.ditch_boundary == 'Cauchy':
                 for i in range(self.rows):
                     for j in range(self.cols):
-                        if self.ditch_h[i,j] < -eps and np.isfinite(self.cmask[i,j]):
+                        if (self.ditch_h[i,j] < -eps and np.isfinite(self.cmask[i,j])
+                                and Htmp[i,j] > self.ele[i,j] + self.ditch_h[i,j]):
                             nbr = []
                             if i > 0 and self.ditch_h[i-1,j] > -eps and np.isfinite(self.cmask[i-1,j]):
                                 nbr.append(self.Tr1[i-1,j])
