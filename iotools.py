@@ -528,7 +528,7 @@ def preprocess_budata(pbu, spatial_pbu, orgp, rootp, gisdata, spatial=True):
     return data
 
 
-def preprocess_dsdata(pspd, spatial_pspd, deepp, gisdata, spatial=True):
+def preprocess_dsdata(pspd, spatial_pspd, deepp, gisdata, spatial=True, root_min_gwl=-150.1):
     """
     Builds the input parameter dictionary for SoilGrid_2Dflow initialization
     using soiltype-wise (uniform per soil class) interpolation functions.
@@ -543,6 +543,7 @@ def preprocess_dsdata(pspd, spatial_pspd, deepp, gisdata, spatial=True):
         gisdata     (dict): GIS raster arrays including 'deep_id', 'elevation',
                             'streams', 'lakes', 'dxy'.
         spatial     (bool): If True, fills spatial arrays from gisdata.
+        root_min_gwl (float): Deepest groundwater reference needed for root moisture [m].
 
     Returns:
         data (dict): Fully populated parameter arrays ready for
@@ -593,7 +594,8 @@ def preprocess_dsdata(pspd, spatial_pspd, deepp, gisdata, spatial=True):
         # interpolation function between wsto and gwl
         value.update(gwl_Wsto(value['deep_z'], value['pF'], value['deep_ksat']))
         # interpolation function between root_wsto and gwl
-        value.update(gwl_Wsto(value['deep_z'][:2], {key: value['pF'][key][:2] for key in value['pF'].keys()}, root=True))
+        value.update(gwl_Wsto(value['deep_z'][:2], {key: value['pF'][key][:2] for key in value['pF'].keys()},
+                              root=True, root_min_gwl=min(root_min_gwl, value['deep_z'][-1])))
 
     # stream depth corresponding to assigned parameter
     #data['streams'] = np.where((data['streams'] < -eps) | (data['lakes'] < -eps), pspd['stream_depth'], 0)
@@ -611,7 +613,7 @@ def preprocess_dsdata(pspd, spatial_pspd, deepp, gisdata, spatial=True):
     return data
 
 
-def preprocess_dsdata_vec(pspd, spatial_pspd, deepp, gisdata, spatial=True):
+def preprocess_dsdata_vec(pspd, spatial_pspd, deepp, gisdata, spatial=True, root_min_gwl=-150.1):
     """
     Builds the input parameter dictionary for SoilGrid_2Dflow initialization
     using cell-wise (spatially varying) interpolation functions.
@@ -627,6 +629,7 @@ def preprocess_dsdata_vec(pspd, spatial_pspd, deepp, gisdata, spatial=True):
         gisdata      (dict): GIS raster arrays including 'deep_id', 'deep_z',
                              'elevation', 'streams', 'lakes', 'dxy'.
         spatial      (bool): If True, fills spatial arrays from gisdata.
+        root_min_gwl (float): Deepest groundwater reference needed for root moisture [m].
 
     Returns:
         data (dict): Fully populated parameter arrays ready for
@@ -681,7 +684,8 @@ def preprocess_dsdata_vec(pspd, spatial_pspd, deepp, gisdata, spatial=True):
             # interpolation function between wsto and gwl
             value.update(gwl_Wsto(value['deep_z'], value['pF'], -0.01, value['deep_ksat']))
             # interpolation function between root_wsto and gwl
-            value.update(gwl_Wsto(value['deep_z'][:2], {key: value['pF'][key][:2] for key in value['pF'].keys()}, root=True))
+            value.update(gwl_Wsto(value['deep_z'][:2], {key: value['pF'][key][:2] for key in value['pF'].keys()},
+                                  root=True, root_min_gwl=min(root_min_gwl, value['deep_z'][-1])))
         
         active = [st for st in deepp.keys() if 'to_gwl' in deepp[st]]  # soil types present in this catchment
         data['wtso_to_gwl']    = {st: deepp[st]['to_gwl']       for st in active}
@@ -739,13 +743,18 @@ def preprocess_dsdata_vec(pspd, spatial_pspd, deepp, gisdata, spatial=True):
 
         mask = np.isfinite(deep_zs[:,0])
         ifs_v = gwl_Wsto_vectorized(deep_zs[mask], deep_pFs[mask], -0.2, deep_ksats[mask])
-        ifs_r = gwl_Wsto_vectorized(value['deep_z'][:2], {key: value['pF'][key][:2] for key in value['pF'].keys()}, root=True)
+        for value in deepp.values():
+            soil_mask = mask & (deep_id_f == value['deep_id'])
+            if np.any(soil_mask):
+                ifs_r = gwl_Wsto_vectorized(
+                    value['deep_z'][:2], {key: value['pF'][key][:2] for key in value['pF'].keys()},
+                    root=True, root_min_gwl=min(root_min_gwl, -np.nanmax(deep_z_f[soil_mask])))
+                temp_to_rootmoist[soil_mask] = ifs_r['to_rootmoist']
         
         temp_to_gwl[mask] = ifs_v['to_gwl']
         temp_to_wsto[mask] = ifs_v['to_wsto']
         temp_to_C[mask] = ifs_v['to_C']
         temp_to_Tr[mask] = ifs_v['to_Tr']
-        temp_to_rootmoist[mask] = ifs_r['to_rootmoist']
 
         data['wtso_to_gwl'] = temp_to_gwl.reshape(gridshape.shape)
         data['gwl_to_wsto'] = temp_to_wsto.reshape(gridshape.shape)

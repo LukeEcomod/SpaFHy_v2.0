@@ -1179,7 +1179,17 @@ def connectivity_scalar_exp(gwl, gwl_high=-0.5, s_ref=1e-7, gwl_ref=-5.0):
         return float(scalar)
     return scalar
 
-def gwl_Wsto(z, pF, grid_step=-0.01, Ksat=None, root=False):
+def _extend_root_gwl_grid(gwl, root_min_gwl):
+    """Extend the root-moisture grid to the deepest required groundwater level."""
+    if not np.isfinite(root_min_gwl):
+        raise ValueError('root_min_gwl must be finite')
+    if root_min_gwl >= gwl[-1]:
+        return gwl
+    extension = np.arange(gwl[-1] - 0.1, root_min_gwl, -0.1)
+    return np.concatenate((gwl, extension, [root_min_gwl]))
+
+
+def gwl_Wsto(z, pF, grid_step=-0.01, Ksat=None, root=False, root_min_gwl=-150.1):
     """
     Builds scipy interpolation functions relating groundwater level (gwl) to
     soil column water storage, transmissivity, and differential water capacity
@@ -1199,6 +1209,9 @@ def gwl_Wsto(z, pF, grid_step=-0.01, Ksat=None, root=False):
                            Required unless root=True.
         root      (bool):  If True, returns only the gwl → root zone moisture
                            function instead of the full set.
+        root_min_gwl (float): Deepest reference or possible groundwater level [m]
+                           for the root-moisture lookup. Ignored unless root=True.
+                           The extended portion uses 0.1 m spacing.
 
     Returns:
         dict with keys (unless root=True, which returns only 'to_rootmoist'):
@@ -1212,7 +1225,8 @@ def gwl_Wsto(z, pF, grid_step=-0.01, Ksat=None, root=False):
     dz[1:] = z[:-1] - z[1:] # profile depths into profile thicknesses
 
     # finer grid for calculating wsto to avoid discontinuity in C (dWsto/dGWL)
-    z_fine= (np.arange(0, min(z), grid_step) - grid_step).astype(np.float64)
+    z_fine = np.arange(0, min(z), grid_step)
+    z_fine = (z_fine + grid_step if root else z_fine - grid_step).astype(np.float64)
     dz_fine = z_fine*0.0 - grid_step
     z_mid_fine = dz_fine / 2 - np.cumsum(dz_fine)
 
@@ -1231,15 +1245,17 @@ def gwl_Wsto(z, pF, grid_step=-0.01, Ksat=None, root=False):
 
     # --------- connection between gwl and Wsto, Tr, C------------
     gwl = np.arange(1.0, min(z)-5, grid_step)
-    # solve water storage corresponding to gwls
-    Wsto_deep = [sum(h_to_cellmoist(pF_fine, g - z_mid_fine, dz_fine) * dz_fine)
-            + max(0.0,g) for g in gwl]  # water storage above ground surface == gwl
 
     if root:
+        gwl = _extend_root_gwl_grid(gwl, root_min_gwl)
         Wsto_deep = [sum(h_to_cellmoist(pF_fine, g - z_mid_fine, dz_fine) * dz_fine) for g in gwl]
         Wsto_deep = Wsto_deep/sum(dz)
         GwlToWsto = interp1d(np.array(gwl), np.array(Wsto_deep), fill_value='extrapolate')
         return {'to_rootmoist': GwlToWsto}
+
+    # solve water storage corresponding to gwls
+    Wsto_deep = [sum(h_to_cellmoist(pF_fine, g - z_mid_fine, dz_fine) * dz_fine)
+            + max(0.0,g) for g in gwl]  # water storage above ground surface == gwl
 
     # solve transmissivity corresponding to gwls
     Tr = [transmissivity(dz, Ksat, g) * 86400. for g in gwl]  # [m2 d-1]
@@ -1366,7 +1382,7 @@ def transmissivity(dz, Ksat, gwl):
     return Tr #* connectivity_scalar_exp(gwl)
 
 
-def gwl_Wsto_vectorized(z, pF, grid_step=-0.01, Ksat=None, root=False):
+def gwl_Wsto_vectorized(z, pF, grid_step=-0.01, Ksat=None, root=False, root_min_gwl=-150.1):
     """
     Builds per-cell scipy interpolation functions relating groundwater level
     to soil column water storage, transmissivity, and differential water
@@ -1386,6 +1402,10 @@ def gwl_Wsto_vectorized(z, pF, grid_step=-0.01, Ksat=None, root=False):
         Ksat      (array):             Saturated hydraulic conductivity [m s-1] per
                                        cell/layer. Required unless root=True.
         root      (bool):              If True, returns only gwl → root zone moisture.
+        root_min_gwl (float):          Deepest reference or possible groundwater
+                                       level [m] for the root-moisture lookup.
+                                       Ignored unless root=True. The extended
+                                       portion uses 0.1 m spacing.
 
     Returns:
         dict with keys (unless root=True, which returns only 'to_rootmoist'):
@@ -1437,7 +1457,8 @@ def gwl_Wsto_vectorized(z, pF, grid_step=-0.01, Ksat=None, root=False):
         # Compute dz_fine
         dz_fine = np.abs(np.diff(z_fine, axis=1))  # Compute differences along the second axis
         # Insert the first element (z_fine[:, 0] - 0) at the beginning
-        dz_fine = np.hstack([z_fine[:, [0]], dz_fine])
+        first_dz = np.abs(z_fine[:, [0]]) if root else z_fine[:, [0]]
+        dz_fine = np.hstack([first_dz, dz_fine])
         z_mid_fine = dz_fine / 2 - np.cumsum(dz_fine, axis=1)
         ix = np.full((z_fine.shape), np.nan)
         # Expand z along the second axis to match z_fine's shape (broadcasting)
@@ -1482,14 +1503,15 @@ def gwl_Wsto_vectorized(z, pF, grid_step=-0.01, Ksat=None, root=False):
         z3 = np.arange(limits[1], limits[2], steps[2])
         gwl = np.concatenate([z1, z2, z3])  # Ensure exact z_min
 
-    Wsto_deep = np.stack([h_to_cellmoist_vectorized(pF_fine, g - z_mid_fine, dz_fine) + max(0.0, g) for g in gwl]).T
-
     if root:
+        gwl = _extend_root_gwl_grid(gwl, root_min_gwl)
         Wsto_deep = np.stack([h_to_cellmoist_vectorized(pF_fine, g - z_mid_fine, dz_fine) for g in gwl]).T
-        Wsto_deep = Wsto_deep/np.nansum(dz, axis=1)
+        Wsto_deep = Wsto_deep / np.nansum(dz, axis=1)[:, None]
         #GwlToWsto = interp1d(np.array(gwl), np.array(Wsto_deep), fill_value='extrapolate')
         GwlToWsto = [interp1d(gwl, wsto_row, kind='linear', fill_value='extrapolate') for wsto_row in Wsto_deep]
         return {'to_rootmoist': GwlToWsto}
+
+    Wsto_deep = np.stack([h_to_cellmoist_vectorized(pF_fine, g - z_mid_fine, dz_fine) + max(0.0, g) for g in gwl]).T
 
     Tr1 = np.stack([transmissivity_vectorized(dz, Ksat, g) * 86400. for g in gwl]).T
 
