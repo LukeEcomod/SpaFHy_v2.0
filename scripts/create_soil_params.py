@@ -60,11 +60,11 @@ _KMIN = {
 }
 
 _MAX_DEPTH = {
-    'Bedrock':  15.0,
-    'Peat':     15.0,
-    'Silt':      15.0,
-    'Till':      15.0,
-    'Sand':     15.0,
+    'Bedrock':  30.0,
+    'Peat':     30.0,
+    'Silt':     30.0,
+    'Till':     30.0,
+    'Sand':     30.0,
 }
 
 _CONST_SURF_KMAX = {             # depth [m] over which Ksat is held constant at Kmax before exponential decay

@@ -5,7 +5,7 @@
 #SBATCH --partition=small
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=64G
-#SBATCH --time=32:00:00
+#SBATCH --time=04:00:00
 #SBATCH --array=0-7
 #SBATCH --output=logs/%x-%A_%a.out
 #SBATCH --error=logs/%x-%A_%a.err
