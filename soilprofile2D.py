@@ -655,13 +655,13 @@ class SoilGrid_2Dflow(object):
                         if nbr:
                             self.Tr0[i,j] = np.mean(nbr)
 
-        # Above ditch level, use the mean transmissivity of aquifer neighbours.
-        # Below it, retain the cell's own groundwater-dependent transmissivity.
+        # Freeze the treatment for this substep to prevent threshold oscillation.
+        ditch_neighbour_tr = ((self.ditch_h < -eps) & np.isfinite(self.cmask)
+                              & (self.H > self.ele + self.ditch_h))
         if self.ditch_boundary == 'Cauchy':
             for i in range(self.rows):
                 for j in range(self.cols):
-                    if (self.ditch_h[i,j] < -eps and np.isfinite(self.cmask[i,j])
-                            and self.H[i,j] > self.ele[i,j] + self.ditch_h[i,j]):
+                    if ditch_neighbour_tr[i,j]:
                         nbr = []
                         if i > 0 and self.ditch_h[i-1,j] > -eps and np.isfinite(self.cmask[i-1,j]):
                             nbr.append(self.Tr0[i-1,j])
@@ -770,12 +770,11 @@ class SoilGrid_2Dflow(object):
                             if nbr:
                                 self.Tr1[i,j] = np.mean(nbr)
 
-            # Apply the same ditch-level condition to the current iterate.
+            # Keep the substep's treatment while updating transmissivity values.
             if self.ditch_boundary == 'Cauchy':
                 for i in range(self.rows):
                     for j in range(self.cols):
-                        if (self.ditch_h[i,j] < -eps and np.isfinite(self.cmask[i,j])
-                                and Htmp[i,j] > self.ele[i,j] + self.ditch_h[i,j]):
+                        if ditch_neighbour_tr[i,j]:
                             nbr = []
                             if i > 0 and self.ditch_h[i-1,j] > -eps and np.isfinite(self.cmask[i-1,j]):
                                 nbr.append(self.Tr1[i-1,j])

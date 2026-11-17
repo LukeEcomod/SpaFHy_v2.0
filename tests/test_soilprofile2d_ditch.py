@@ -113,7 +113,7 @@ class CauchyDitchTransmissivityTest(unittest.TestCase):
         ]))
         self.assertGreater(results['netflow_to_ditch'][1, 1], 0.0)
 
-    def test_transmissivity_switches_when_head_crosses_ditch_level(self):
+    def test_treatment_is_frozen_until_next_substep_after_crossing(self):
         elevation = np.full((3, 3), 245.81)
         elevation[1, 2] = 228.58
         streams = np.zeros((3, 3))
@@ -133,14 +133,55 @@ class CauchyDitchTransmissivityTest(unittest.TestCase):
                 if start > streams[1, 1]:
                     self.assertLess(end, streams[1, 1])
                     self.assertAlmostEqual(model.Tr0[1, 1], transmissivity(-0.1))
-                    self.assertAlmostEqual(model.Tr1[1, 1], transmissivity(end), places=3)
-                else:
-                    self.assertGreater(end, streams[1, 1])
-                    self.assertAlmostEqual(model.Tr0[1, 1], transmissivity(start))
                     self.assertAlmostEqual(model.Tr1[1, 1], np.mean([
                         model.Tr1[0, 1], model.Tr1[2, 1], model.Tr1[1, 0], model.Tr1[1, 2]
                     ]))
+                else:
+                    self.assertGreater(end, streams[1, 1])
+                    self.assertAlmostEqual(model.Tr0[1, 1], transmissivity(start))
+                    self.assertAlmostEqual(model.Tr1[1, 1], transmissivity(end), places=3)
                 self.assertLess(abs(results['water_closure'][1, 1]), 1e-3)
+
+                before_next = model.gwl.copy()
+                converged, _ = model._solve_step(
+                    0.001, np.zeros((3, 3)), np.zeros((3, 3)), 1e-3, 50)
+                self.assertTrue(converged)
+                if start > streams[1, 1]:
+                    self.assertAlmostEqual(model.Tr0[1, 1], transmissivity(before_next[1, 1]))
+                else:
+                    self.assertAlmostEqual(model.Tr0[1, 1], np.mean([
+                        model.Tr0[0, 1], model.Tr0[2, 1], model.Tr0[1, 0], model.Tr0[1, 2]
+                    ]))
+
+    def test_threshold_oscillation_converges_with_frozen_treatment(self):
+        shape = (3, 3)
+        elevation = np.full(shape, 245.81)
+        gwl = np.full(shape, -0.4)
+        gwl[1, 1] = -0.334
+        streams = np.zeros(shape)
+        streams[1, 1] = -0.333
+        model = make_model(gwl, elevation, streams)
+        model.dxy = 20.0
+        model.picard_relax = 0.7
+        model.soiltype[1, 1] = 'ditch'
+        for attr in ('gwl_to_wsto', 'gwl_to_C', 'gwl_to_rootmoist'):
+            functions = getattr(model, attr)
+            functions['ditch'] = functions['soil']
+        model.gwl_to_Tr = {
+            'soil': lambda h: np.full_like(h, 10.0),
+            'ditch': lambda h: np.full_like(h, 0.001),
+        }
+        rr = np.zeros(shape)
+        rr[1, 1] = 0.0005
+
+        converged, results = model._solve_step(1.0, rr, np.zeros(shape), 1e-3, 50)
+
+        self.assertTrue(converged)
+        self.assertGreater(results['ground_water_level'][1, 1], streams[1, 1])
+        self.assertAlmostEqual(model.Tr0[1, 1], 0.001)
+        self.assertAlmostEqual(model.Tr1[1, 1], 0.001)
+        self.assertLess(abs(results['water_closure'][1, 1]), 0.1)
+        self.assertAlmostEqual(np.sum(results['lateral_netflow']), 0.0, places=8)
 
     def test_lake_transmissivity_still_uses_neighbour_mean(self):
         elevation = np.full((3, 3), 245.81)
