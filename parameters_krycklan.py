@@ -61,7 +61,7 @@ def parameters(folder='', soil_params=None):
             #'end_date': '2024-01-01', # FULL RUN
             #'spinup_end': '2014-08-31',  # FULL RUN
             'start_date': '2014-01-01', # CALIBRATION
-            'end_date': '2015-10-01', # CALIBRATION
+            'end_date': '2016-10-01', # CALIBRATION
             'spinup_end': '2015-04-01',  # CALIBRATION
             'dt': 86400.0,
             'spatial_cpy': True,  # if False uses parameters from cpy['state']
