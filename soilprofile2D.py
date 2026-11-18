@@ -366,7 +366,7 @@ class SoilGrid_2Dflow(object):
         self.tmstep += 1
 
         # convergence criteria: looser during spin-up, tighter afterwards
-        crit = 1e-2 if self.tmstep <= self.spinup_steps else 1e-3
+        crit = 1e-2 if self.tmstep <= self.spinup_steps else 1e-4
         # implicit solution for spinup, crank-nicholson afterwards
         self.implic = 1.0 if self.tmstep <= self.spinup_steps else 0.5
 
