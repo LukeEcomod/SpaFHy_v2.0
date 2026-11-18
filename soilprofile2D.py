@@ -404,10 +404,10 @@ class SoilGrid_2Dflow(object):
         # dropping the earlier sub-steps' return flow from the water balance
         self.qr = combined['return_flow'] * 1e-3
 
-        if overall_min_dt < dt:
-            print(f'  Timestep {self.tmstep}: dt={dt:.5f} d required sub-stepping down to '
-                  f'{overall_min_dt:.5f} d')
-        return combined
+        #if overall_min_dt < dt:
+        #    print(f'  Timestep {self.tmstep}: dt={dt:.5f} d required sub-stepping down to '
+        #          f'{overall_min_dt:.5f} d')
+        #return combined
 
     # rate-type outputs [mm d-1]: time-weighted average across sub-steps
     _RATE_RESULT_KEYS = ('lateral_netflow', 'netflow_to_ditch', 'netflow_to_lake', 'water_closure')
@@ -461,14 +461,14 @@ class SoilGrid_2Dflow(object):
             if not converged:
                 reason = (f'reached the {self.min_substep_dt:.5f} d minimum sub-step'
                           if floor_reached else f'after {self.max_substep_halvings} halvings')
-                print(f'  WARNING: sub-step dt={dt_sub:.5f} d (depth {depth}) did not converge '
-                      f'{reason} within {iter_budget} iterations; accepting last iterate')
+                #print(f'  WARNING: sub-step dt={dt_sub:.5f} d (depth {depth}) did not converge '
+                #      f'{reason} within {iter_budget} iterations; accepting last iterate')
                 n_cells, deep_id_counts = self._last_non_conv_summary
-                print(f'  Non-converged cells: {n_cells}')
+                #print(f'  Non-converged cells: {n_cells}')
                 if deep_id_counts is not None:
                     ids, counts = deep_id_counts
-                    for did, cnt in zip(ids, counts):
-                        print(f'    deep_id={int(did)}: {cnt} cells')
+                    #for did, cnt in zip(ids, counts):
+                        #print(f'    deep_id={int(did)}: {cnt} cells')
             self._min_substep_dt = min(self._min_substep_dt, dt_sub)
             return results
 
@@ -865,7 +865,7 @@ class SoilGrid_2Dflow(object):
                 }
                 nan_terms = [name for name, arr in terms.items() if np.any(~np.isfinite(arr[bad_rhs]))]
                 bad_2d = np.argwhere(np.reshape(bad_rhs, (self.rows, self.cols)))
-                print(f'  WARNING: {np.sum(bad_rhs)} cell(s) with NaN rhs at timestep {self.tmstep}, it {it}, NaN in: {nan_terms}')
+                #print(f'  WARNING: {np.sum(bad_rhs)} cell(s) with NaN rhs at timestep {self.tmstep}, it {it}, NaN in: {nan_terms}')
                 for idx in bad_2d[:3]:
                     i, j = idx
                     k = i * self.cols + j
