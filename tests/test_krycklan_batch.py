@@ -93,8 +93,10 @@ class FakePool:
         return iter([{'sample_id': 1, 'rmse_tot': 1.0, 'rmse_sbsrf': 1.0}])
 
 with patch('multiprocessing.Pool', FakePool), \\
-     patch('read_runoff.read_runoff', return_value={'Q': None}):
+     patch('dotenv.load_dotenv'), \\
+     patch('read_runoff.read_runoff', return_value={'Q': None}) as read_runoff:
     runpy.run_path('run_glue_krycklan.py', run_name='__main__')
+    read_runoff.assert_called_once_with(2, '/discharge data')
 """
         with tempfile.TemporaryDirectory() as results_dir:
             for resolution in (20, 160):
@@ -102,6 +104,7 @@ with patch('multiprocessing.Pool', FakePool), \\
                     env = os.environ.copy()
                     env.update(
                         PROJECT_FOLDER='/project', SPAFHY_RESULTS_FOLDER=results_dir,
+                        RUNOFF_DATA='/discharge data',
                         SPAFHY_RESOLUTION=str(resolution), N_SAMPLES='1',
                         SLURM_CPUS_PER_TASK='1',
                     )
@@ -112,6 +115,21 @@ with patch('multiprocessing.Pool', FakePool), \\
                     self.assertEqual(result.returncode, 0, result.stderr)
                     output_root = Path(results_dir) / 'krycklan' / 'glue_krycklan' / f'{resolution}m'
                     self.assertEqual(len(list(output_root.glob('*/glue_results.csv'))), 1)
+
+            for value in (None, '', '   '):
+                with self.subTest(runoff_data=value):
+                    env = os.environ.copy()
+                    env.update(PROJECT_FOLDER='/project', SPAFHY_RESULTS_FOLDER=results_dir)
+                    if value is None:
+                        env.pop('RUNOFF_DATA', None)
+                    else:
+                        env['RUNOFF_DATA'] = value
+                    result = subprocess.run(
+                        [sys.executable, '-c', code], cwd=ROOT, env=env,
+                        text=True, capture_output=True,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('RUNOFF_DATA is not set', result.stderr)
 
 
 class KrycklanBatchTest(unittest.TestCase):

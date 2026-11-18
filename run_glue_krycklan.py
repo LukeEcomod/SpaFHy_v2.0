@@ -130,10 +130,13 @@ if __name__ == '__main__':
     _results_folder = os.environ.get('SPAFHY_RESULTS_FOLDER')
     if not _results_folder or not _results_folder.strip():
         raise EnvironmentError('SPAFHY_RESULTS_FOLDER is not set. Define it in .env or the environment.')
+    _runoff_folder = os.environ.get('RUNOFF_DATA')
+    if not _runoff_folder or not _runoff_folder.strip():
+        raise EnvironmentError('RUNOFF_DATA is not set. Define it in .env or the environment.')
     folder = str(Path(_project_folder) / 'krycklan')
     resolution = importlib.import_module('parameters_krycklan').reso
     catchment_no = 2
-    runoff_folder = os.path.join(folder, 'obs', 'DISCHARGE')
+    runoff_folder = str(Path(_runoff_folder).expanduser())
 
     n_samples = int(os.environ.get('N_SAMPLES', DEFAULT_N_SAMPLES))
     seed = int(os.environ.get('GLUE_SEED', DEFAULT_SEED))
