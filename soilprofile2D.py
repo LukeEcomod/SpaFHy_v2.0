@@ -407,7 +407,7 @@ class SoilGrid_2Dflow(object):
         #if overall_min_dt < dt:
         #    print(f'  Timestep {self.tmstep}: dt={dt:.5f} d required sub-stepping down to '
         #          f'{overall_min_dt:.5f} d')
-        #return combined
+        return combined
 
     # rate-type outputs [mm d-1]: time-weighted average across sub-steps
     _RATE_RESULT_KEYS = ('lateral_netflow', 'netflow_to_ditch', 'netflow_to_lake', 'water_closure')
