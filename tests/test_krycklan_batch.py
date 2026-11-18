@@ -73,6 +73,47 @@ print(json.dumps([p.reso, p.streams, g['gis_folder'], g['results_folder'],
                 self.assertTrue(result.stderr)
 
 
+class KrycklanGlueOutputTest(unittest.TestCase):
+    def test_output_path_uses_model_resolution(self):
+        code = """
+import runpy
+from unittest.mock import patch
+
+class FakePool:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+    def imap_unordered(self, func, args):
+        return iter([{'sample_id': 1, 'rmse_tot': 1.0, 'rmse_sbsrf': 1.0}])
+
+with patch('multiprocessing.Pool', FakePool), \\
+     patch('read_runoff.read_runoff', return_value={'Q': None}):
+    runpy.run_path('run_glue_krycklan.py', run_name='__main__')
+"""
+        with tempfile.TemporaryDirectory() as results_dir:
+            for resolution in (20, 160):
+                with self.subTest(resolution=resolution):
+                    env = os.environ.copy()
+                    env.update(
+                        PROJECT_FOLDER='/project', SPAFHY_RESULTS_FOLDER=results_dir,
+                        SPAFHY_RESOLUTION=str(resolution), N_SAMPLES='1',
+                        SLURM_CPUS_PER_TASK='1',
+                    )
+                    result = subprocess.run(
+                        [sys.executable, '-c', code], cwd=ROOT, env=env,
+                        text=True, capture_output=True,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    output_root = Path(results_dir) / 'krycklan' / 'glue_krycklan' / f'{resolution}m'
+                    self.assertEqual(len(list(output_root.glob('*/glue_results.csv'))), 1)
+
+
 class KrycklanBatchTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

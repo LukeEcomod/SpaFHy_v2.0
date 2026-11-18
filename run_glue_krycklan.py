@@ -131,6 +131,7 @@ if __name__ == '__main__':
     if not _results_folder or not _results_folder.strip():
         raise EnvironmentError('SPAFHY_RESULTS_FOLDER is not set. Define it in .env or the environment.')
     folder = str(Path(_project_folder) / 'krycklan')
+    resolution = importlib.import_module('parameters_krycklan').reso
     catchment_no = 2
     runoff_folder = os.path.join(folder, 'obs', 'DISCHARGE')
 
@@ -144,7 +145,7 @@ if __name__ == '__main__':
     print(f'Using {n_workers} worker processes')
 
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-    output_dir = Path(_results_folder).expanduser() / 'krycklan' / 'glue_krycklan' / timestamp
+    output_dir = Path(_results_folder).expanduser() / 'krycklan' / 'glue_krycklan' / f'{resolution}m' / timestamp
     output_dir.mkdir(parents=True, exist_ok=True)
 
     context = {
