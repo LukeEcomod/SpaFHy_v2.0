@@ -1,3 +1,6 @@
+import ast
+from contextlib import redirect_stdout
+from io import StringIO
 import json
 import os
 from pathlib import Path
@@ -110,6 +113,72 @@ class GlueNotebookSelectionTest(unittest.TestCase):
         finally:
             plt.close('all')
 
+    def test_parameter_plot_labels_first_active_panel_per_row(self):
+        for settings, first_active in (
+            ({'n_sims_tot': 1, 'n_sims_sbsrf': 1, 'n_sims_ave': 1}, 0),
+            ({'n_sims_tot': 0, 'n_sims_ave': 1}, 2),
+        ):
+            with self.subTest(settings=settings):
+                state = self.run_selection(prepare_metrics=True, **settings)
+                state['plt'] = plt
+                metric_function = ast.parse(self.cells['54bf551f']).body[0]
+                exec(compile(ast.Module(body=[metric_function], type_ignores=[]), '<metric>', 'exec'), state)
+                try:
+                    exec(self.cells['fcef38f9'], state)
+                    self.assertEqual([ax.get_title() for ax in state['axes'][0]],
+                                     ['Total', 'Subsurface', 'Average'])
+                    for ax, label in zip(state['axes'].flat, ('A)', 'B)', 'C)', 'D)', 'E)', 'F)')):
+                        self.assertEqual([text.get_text() for text in ax.texts], [label])
+                    self.assertTrue(all(not ax.get_xlabel() for ax in state['axes'][0]))
+                    self.assertTrue(all(ax.get_xlabel() for ax in state['axes'][1] if ax.axison))
+                    for row, expected in ((0, 0), (1, first_active)):
+                        axes = state['axes'][row]
+                        self.assertEqual([i for i, ax in enumerate(axes) if ax.get_ylabel()], [expected])
+                        self.assertTrue(any(label.get_visible() for label in axes[expected].get_yticklabels()))
+                    for ax in state['axes'][0]:
+                        self.assertEqual(len(ax.collections[0].get_offsets()), len(state['data']))
+                    for ax, suffix in zip(state['axes'][1], ('tot', 'sbsrf', 'ave')):
+                        selected = state[f'suitable_simulations_{suffix}']
+                        self.assertEqual(ax.axison, not selected.empty)
+                        if not selected.empty:
+                            self.assertEqual(len(ax.collections[0].get_offsets()), len(selected))
+                    full_x, selected_x = state['axes'][0, 0].get_xlim(), state['axes'][1, 0].get_xlim()
+                    full_y, selected_y = state['axes'][0, 0].get_ylim(), state['axes'][1, 0].get_ylim()
+                    self.assertLessEqual(full_x[0], selected_x[0])
+                    self.assertGreaterEqual(full_x[1], selected_x[1])
+                    self.assertLessEqual(full_y[0], selected_y[0])
+                    self.assertGreaterEqual(full_y[1], selected_y[1])
+                finally:
+                    plt.close('all')
+
+    def test_parameter_colorbars_share_rows_with_different_precisions(self):
+        state = self.run_selection(prepare_metrics=True, n_sims_tot=1, n_sims_sbsrf=1, n_sims_ave=1)
+        for suffix, value in zip(('tot', 'sbsrf', 'ave'), (0.835, 0.836, 0.837)):
+            state['data'][f'kge_{suffix}'] = value
+            state[f'suitable_simulations_{suffix}'][f'kge_{suffix}'] = value
+        state['plt'] = plt
+        metric_function = ast.parse(self.cells['54bf551f']).body[0]
+        exec(compile(ast.Module(body=[metric_function], type_ignores=[]), '<metric>', 'exec'), state)
+        try:
+            exec(self.cells['fcef38f9'], state)
+            fig = state['fig']
+            fig.canvas.draw()
+            colorbars = [ax._colorbar for ax in fig.axes if getattr(ax, '_colorbar', None)]
+            self.assertEqual(len(colorbars), 2)
+            for row_axes, expected_min, expected_max in (
+                (state['axes'][0], 0.8, 0.9),
+                (state['axes'][1], 0.83, 0.84),
+            ):
+                for ax in row_axes:
+                    self.assertAlmostEqual(ax.collections[0].norm.vmin, expected_min)
+                    self.assertAlmostEqual(ax.collections[0].norm.vmax, expected_max)
+            for colorbar, expected_labels in zip(colorbars, (['0.83', '0.84'], ['0.8', '0.9'])):
+                labels = [label.get_text() for label in colorbar.ax.get_yticklabels()]
+                self.assertEqual(labels, expected_labels)
+                self.assertEqual(colorbar.ax.get_ylabel(), 'KGE')
+        finally:
+            plt.close('all')
+
     def test_existing_time_series_reruns_need_only_original_metrics(self):
         state = self.run_selection(prepare_metrics=True)
         params = {name: 0.5 for name in state['base_metrics']}
@@ -135,6 +204,131 @@ class GlueNotebookSelectionTest(unittest.TestCase):
         ):
             with self.subTest(settings=settings), self.assertRaises(ValueError):
                 self.run_selection(**settings)
+
+
+class ResolutionComparisonPlotTest(unittest.TestCase):
+    def test_resolution_plot_formatting_and_shared_scales(self):
+        notebook = json.loads((NOTEBOOK.parent / 'analyze_glue_results_reso.ipynb').read_text())
+        cell = next(cell for cell in notebook['cells'] if cell.get('id') == 'reso-parameters')
+        source = ''.join(cell['source'])
+        for resolutions in ((20,), (20, 40, 80, 160)):
+            with self.subTest(resolutions=resolutions):
+                frames = {
+                    resolution: pd.DataFrame({
+                        'kmax_Till': [0.001, 0.002],
+                        'f_Till': [6, 8],
+                        'kge_tot': [0.835 + index * 0.001, 0.837 + index * 0.001],
+                        'kge_sbsrf': [0.825 + index * 0.001, 0.826 + index * 0.001],
+                    })
+                    for index, resolution in enumerate(resolutions)
+                }
+                state = {'np': np, 'pd': pd, 'plt': plt, 'soil_type': 'Till',
+                         'results_by_resolution': frames}
+                try:
+                    exec(source, state)
+                    fig, axes = state['fig'], state['axes']
+                    fig.canvas.draw()
+                    self.assertEqual([text.get_text() for text in fig.legends[0].get_texts()],
+                                     ['KGE >= 0.825 samples (no contour)'])
+                    renderer = fig.canvas.get_renderer()
+                    legend_gap = (fig.legends[0].get_window_extent(renderer).y0
+                                  - max(ax.title.get_window_extent(renderer).y1 for ax in axes[0]))
+                    self.assertGreaterEqual(legend_gap, 0)
+                    self.assertLess(legend_gap, 0.15 * fig.dpi)
+                    self.assertEqual(axes.shape, (len(resolutions), 3))
+                    self.assertEqual([ax.get_title() for ax in axes[0]], ['Total', 'Subsurface', 'Average'])
+                    for index, ax in enumerate(axes.flat):
+                        labels = [text.get_text() for text in ax.texts]
+                        self.assertIn(f'{chr(ord("A") + index)})', labels)
+                        self.assertIn(f'{resolutions[index // 3]} m', labels)
+                    for row in range(len(resolutions)):
+                        self.assertEqual([i for i, ax in enumerate(axes[row]) if ax.get_ylabel()], [0])
+                        self.assertTrue(all(bool(ax.get_xlabel()) == (row == len(resolutions) - 1)
+                                            for ax in axes[row]))
+                        frame = frames[resolutions[row]]
+                        expected_ave = frame['kge_tot'] / 2 + frame['kge_sbsrf'] / 2
+                        np.testing.assert_allclose(axes[row, 2].collections[0].get_array(), expected_ave)
+                        self.assertNotIn('kge_ave', frame.columns)
+                    norms = [ax.collections[0].norm for ax in axes.flat]
+                    self.assertTrue(all(norm is norms[0] for norm in norms))
+                    self.assertAlmostEqual(norms[0].vmin, 0.82)
+                    self.assertAlmostEqual(norms[0].vmax, 0.84)
+                    colorbars = [ax._colorbar for ax in fig.axes if getattr(ax, '_colorbar', None)]
+                    self.assertEqual(len(colorbars), 1)
+                    self.assertIs(colorbars[0].mappable.norm, norms[0])
+                    self.assertEqual(colorbars[0].ax.get_ylabel(), 'KGE')
+                    self.assertEqual([label.get_text() for label in colorbars[0].ax.get_yticklabels()],
+                                     ['0.82', '0.83', '0.84'])
+                finally:
+                    plt.close('all')
+
+    def test_interpolated_threshold_contour_and_fallbacks(self):
+        notebook = json.loads((NOTEBOOK.parent / 'analyze_glue_results_reso.ipynb').read_text())
+        cell = next(cell for cell in notebook['cells'] if cell.get('id') == 'reso-parameters')
+        source = ''.join(cell['source'])
+        frames = {
+            20: pd.DataFrame({
+                'kmax_Till': [0.001, 0.01, 0.001, 10 ** -2.8],
+                'f_Till': [2, 2, 10, 3],
+                'kge_tot': [0.9, 0.9, 0.9, 0.1],
+                'kge_sbsrf': [0.8, 0.8, 0.8, 0.1],
+            }),
+            40: pd.DataFrame({
+                'kmax_Till': [0.001, 0.01, 0.1],
+                'f_Till': [2, 4, 6],
+                'kge_tot': [0.825, 0.1, 0.1],
+                'kge_sbsrf': [0.9, 0.9, 0.9],
+            }),
+        }
+        state = {'np': np, 'plt': plt, 'soil_type': 'Till', 'results_by_resolution': frames}
+        output = StringIO()
+        contours = []
+        original_contour = matplotlib.axes.Axes.contour
+
+        def capture_contour(ax, x, y, z, *args, **kwargs):
+            contour = original_contour(ax, x, y, z, *args, **kwargs)
+            contours.append((ax, x, y, z.copy(), kwargs, contour))
+            return contour
+
+        try:
+            with redirect_stdout(output), patch.object(matplotlib.axes.Axes, 'contour', capture_contour):
+                exec(source, state)
+            axes = state['axes']
+            self.assertEqual([text.get_text() for text in state['fig'].legends[0].get_texts()], [
+                'KGE >= 0.825 (interpolated boundary)',
+                'KGE >= 0.825 samples (no contour)',
+            ])
+            self.assertEqual(len(contours), 2)
+            for expected_ax, (ax, x, y, grid, kwargs, contour) in zip((axes[0, 0], axes[0, 2]), contours):
+                self.assertIs(ax, expected_ax)
+                self.assertEqual(kwargs['levels'], [0.825])
+                self.assertGreater(len(contour.allsegs[0]), 0)
+                self.assertGreater(grid[0, 0], 0.825)
+                self.assertAlmostEqual(grid[25, 40], 0.1)
+                self.assertTrue(np.ma.is_masked(grid[-1, -1]))
+                self.assertAlmostEqual(x[25, 40], 10 ** -2.8)
+                self.assertEqual(y[25, 40], 3)
+            self.assertEqual(len(axes[0, 1].collections), 1)
+            self.assertEqual(len(axes[1, 0].collections[1].get_offsets()), 1)
+            self.assertEqual(len(axes[1, 1].collections[1].get_offsets()), 3)
+            self.assertEqual(len(axes[1, 2].collections[1].get_offsets()), 1)
+            self.assertIn('20 m Subsurface: no samples meet', output.getvalue())
+            self.assertIn('40 m Total: no threshold contour', output.getvalue())
+            self.assertIn('40 m Subsurface: no threshold contour', output.getvalue())
+        finally:
+            plt.close('all')
+
+        with self.assertRaisesRegex(ValueError, 'kge_threshold must be a finite number'):
+            exec(source.replace('kge_threshold = 0.825', "kge_threshold = float('nan')"), state)
+
+        duplicate = frames[20].iloc[[0]].copy()
+        duplicate['kge_tot'] = 0.3
+        state['results_by_resolution'] = {20: pd.concat([frames[20], duplicate])}
+        try:
+            with self.assertRaisesRegex(ValueError, 'Conflicting KGE values'):
+                exec(source, state)
+        finally:
+            plt.close('all')
 
 
 if __name__ == '__main__':
