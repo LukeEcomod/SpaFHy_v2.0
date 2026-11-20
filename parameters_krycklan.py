@@ -60,12 +60,12 @@ def parameters(folder='', soil_params=None):
             #'start_date': '2013-01-01', # FULL RUN
             #'end_date': '2024-01-01', # FULL RUN
             #'spinup_end': '2014-08-31',  # FULL RUN
-            #'start_date': '2005-01-01', # FULL RUN NEW PERIOD 15 WY
-            #'end_date': '2024-12-31', # FULL RUN NEW
-            #'spinup_end': '2008-08-31',  # FULL RUN NEW
-            'start_date': '2004-01-01', # CALIBRATION PERIOD 3 WY
-            'end_date': '2008-08-31', # CALIBRATION
-            'spinup_end': '2005-08-31',  # CALIBRATION
+            'start_date': '2005-01-01', # FULL RUN NEW PERIOD 15 WY
+            'end_date': '2023-12-31', # FULL RUN NEW
+            'spinup_end': '2008-08-31',  # FULL RUN NEW
+            #'start_date': '2004-01-01', # CALIBRATION PERIOD 3 WY
+            #'end_date': '2008-08-31', # CALIBRATION
+            #'spinup_end': '2005-08-31',  # CALIBRATION
             'dt': 86400.0,
             'spatial_cpy': True,  # if False uses parameters from cpy['state']
             # else needs cf.dat, hc.dat, LAI_decid.dat, LAI_spruce.dat, LAI_pine.dat, (cmask.dat)
@@ -82,7 +82,7 @@ def parameters(folder='', soil_params=None):
             # match soilprofile2D.py; tune per-catchment/resolution if convergence warnings appear)
             'max_substep_halvings': 6,  # max sub-step halvings before accepting a non-converged result
             'min_substep_dt': 0.01171875,  # absolute floor on sub-step size [d] (16.875 min)
-            'early_exit_iter': 40,  # Picard iterations before bailing to try a smaller sub-step
+            'early_exit_iter': 20,  # Picard iterations before bailing to try a smaller sub-step
             'maxiter': 100,  # Picard iterations allowed once no smaller sub-step is possible
             'picard_relax': 0.7,  # <1 damps oscillatory non-convergence (e.g. 0.6-0.8); 1.0 = no damping
             'topmodel': True,

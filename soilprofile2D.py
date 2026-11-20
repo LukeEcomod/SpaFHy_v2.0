@@ -366,7 +366,7 @@ class SoilGrid_2Dflow(object):
         self.tmstep += 1
 
         # convergence criteria: looser during spin-up, tighter afterwards
-        crit = 1e-2 if self.tmstep <= self.spinup_steps else 1e-4
+        crit = 1e-2 if self.tmstep <= self.spinup_steps else 1e-3
         # implicit solution for spinup, crank-nicholson afterwards
         self.implic = 1.0 if self.tmstep <= self.spinup_steps else 0.5
 
@@ -404,9 +404,9 @@ class SoilGrid_2Dflow(object):
         # dropping the earlier sub-steps' return flow from the water balance
         self.qr = combined['return_flow'] * 1e-3
 
-        #if overall_min_dt < dt:
-        #    print(f'  Timestep {self.tmstep}: dt={dt:.5f} d required sub-stepping down to '
-        #          f'{overall_min_dt:.5f} d')
+        if overall_min_dt < dt:
+            print(f'  Timestep {self.tmstep}: dt={dt:.5f} d required sub-stepping down to '
+                  f'{overall_min_dt:.5f} d')
         return combined
 
     # rate-type outputs [mm d-1]: time-weighted average across sub-steps
