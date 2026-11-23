@@ -45,6 +45,7 @@ class SoilGrid_2Dflow(object):
     In Cauchy mode, ditch cells use their own groundwater-dependent
     transmissivity at or below ditch level and the mean of eligible neighbours
     above it. This also affects lateral flow and rewetting near the threshold.
+    Boundary geometry and the catchment mask must remain fixed after initialization.
     """
     def __init__(self, spara):
         """
@@ -152,6 +153,10 @@ class SoilGrid_2Dflow(object):
         self.cmask[self.lake_interior == 1] = np.nan
         self.gwl[self.lake_interior == 1] = np.nan
         self.H[self.lake_interior == 1] = -999
+
+        if self.ditch_boundary == 'Cauchy':
+            self._lake_tr_neighbours = self._boundary_tr_neighbours(self.lake_h)
+            self._ditch_tr_neighbours = self._boundary_tr_neighbours(self.ditch_h)
 
         # lower boundaries
         #print('spara[deep_z]', spara['deep_z'])
@@ -277,6 +282,25 @@ class SoilGrid_2Dflow(object):
         self.picard_relax = spara.get('picard_relax', 1.0)
         #self.totit = 0
 
+    def _boundary_tr_neighbours(self, boundary_h):
+        """Find eligible neighbours once, after the catchment mask is finalized."""
+        valid = np.isfinite(self.cmask)
+        neighbours = []
+        for i, j in zip(*np.where((boundary_h < -eps) & valid)):
+            eligible = []
+            for ni, nj in ((i-1, j), (i+1, j), (i, j-1), (i, j+1)):
+                if (0 <= ni < self.rows and 0 <= nj < self.cols
+                        and boundary_h[ni, nj] > -eps and valid[ni, nj]):
+                    eligible.append((ni, nj))
+            if eligible:
+                neighbours.append(((i, j), eligible))
+        return neighbours
+
+    @staticmethod
+    def _apply_neighbour_transmissivity(Tr, neighbours):
+        for cell, eligible in neighbours:
+            Tr[cell] = np.mean([Tr[neighbour] for neighbour in eligible])
+
     def _eval_rootmoist_at_gwl(self, gwl_value):
         """
         Evaluates gwl_to_rootmoist at a fixed reference groundwater level [m],
@@ -347,6 +371,9 @@ class SoilGrid_2Dflow(object):
         at twice the size of the last one that worked (capped at dt), so once a
         stable smaller step size is found it is reused (and cautiously grown)
         on subsequent timesteps.
+
+        Every solve attempt runs at least five Picard iterations, both during
+        and after spin-up, before it can satisfy the head convergence criterion.
 
         Args:
             dt  (float): Timestep duration [days]. Default 1.0 (daily).
@@ -504,8 +531,8 @@ class SoilGrid_2Dflow(object):
 
         Returns:
             (converged, results):
-                converged (bool): whether conv1 < crit was reached before maxiter
-                    or early_exit_iter, whichever comes first.
+                converged (bool): whether conv1 < crit was reached after at least
+                    five iterations within the iteration budget.
                 results (dict) with keys:
                     'ground_water_level'  [m]:      updated groundwater level below surface
                     'lateral_netflow'     [mm d-1]: net lateral flow (positive = outflow)
@@ -521,6 +548,10 @@ class SoilGrid_2Dflow(object):
         """
 
         
+        min_iter = 5
+        if self.maxiter < min_iter or max_iter < min_iter:
+            raise ValueError('Picard iteration limits must be at least 5')
+
         #***********REMIND: map of array*******************
         #2D array: indices i row, j col
         #Flattened array: n from 0 to rows*cols: n=i*cols+j
@@ -636,43 +667,14 @@ class SoilGrid_2Dflow(object):
                     if np.isfinite(self.cmask[i,j]):
                         self.Tr0[i,j] = self.gwl_to_Tr[i,j](H_for_Tr[i,j] - self.ele[i,j])
 
-        # For Cauchy lake cells: set Tr to mean of aquifer neighbours (run before
-        # the ditch block below, so a ditch cell adjacent to a lake sees the
-        # lake's already-corrected Tr rather than a stale/extreme value)
-        if self.ditch_boundary == 'Cauchy':
-            for i in range(self.rows):
-                for j in range(self.cols):
-                    if self.lake_h[i,j] < -eps and np.isfinite(self.cmask[i,j]):
-                        nbr = []
-                        if i > 0 and self.lake_h[i-1,j] > -eps and np.isfinite(self.cmask[i-1,j]):
-                            nbr.append(self.Tr0[i-1,j])
-                        if i < self.rows-1 and self.lake_h[i+1,j] > -eps and np.isfinite(self.cmask[i+1,j]):
-                            nbr.append(self.Tr0[i+1,j])
-                        if j > 0 and self.lake_h[i,j-1] > -eps and np.isfinite(self.cmask[i,j-1]):
-                            nbr.append(self.Tr0[i,j-1])
-                        if j < self.cols-1 and self.lake_h[i,j+1] > -eps and np.isfinite(self.cmask[i,j+1]):
-                            nbr.append(self.Tr0[i,j+1])
-                        if nbr:
-                            self.Tr0[i,j] = np.mean(nbr)
-
         # Freeze the treatment for this substep to prevent threshold oscillation.
         ditch_neighbour_tr = ((self.ditch_h < -eps) & np.isfinite(self.cmask)
                               & (self.H > self.ele + self.ditch_h))
         if self.ditch_boundary == 'Cauchy':
-            for i in range(self.rows):
-                for j in range(self.cols):
-                    if ditch_neighbour_tr[i,j]:
-                        nbr = []
-                        if i > 0 and self.ditch_h[i-1,j] > -eps and np.isfinite(self.cmask[i-1,j]):
-                            nbr.append(self.Tr0[i-1,j])
-                        if i < self.rows-1 and self.ditch_h[i+1,j] > -eps and np.isfinite(self.cmask[i+1,j]):
-                            nbr.append(self.Tr0[i+1,j])
-                        if j > 0 and self.ditch_h[i,j-1] > -eps and np.isfinite(self.cmask[i,j-1]):
-                            nbr.append(self.Tr0[i,j-1])
-                        if j < self.cols-1 and self.ditch_h[i,j+1] > -eps and np.isfinite(self.cmask[i,j+1]):
-                            nbr.append(self.Tr0[i,j+1])
-                        if nbr:
-                            self.Tr0[i,j] = np.mean(nbr)
+            active_ditch_neighbours = [entry for entry in self._ditch_tr_neighbours
+                                       if ditch_neighbour_tr[entry[0]]]
+            self._apply_neighbour_transmissivity(self.Tr0, self._lake_tr_neighbours)
+            self._apply_neighbour_transmissivity(self.Tr0, active_ditch_neighbours)
 
         # transmissivity at cell interfaces (harmonic or geometric mean, see self.transmissivity_mean)
         TrTmpEW, TrTmpNS = self._interface_transmissivity(self.Tr0)
@@ -752,40 +754,10 @@ class SoilGrid_2Dflow(object):
                         if np.isfinite(self.cmask[i,j]):
                             self.Tr1[i,j] = self.gwl_to_Tr[i,j](H_for_Tr[i,j] - self.ele[i,j])
 
-            # For Cauchy lake cells: set Tr to mean of aquifer neighbours
-            # (run before the ditch block below, see pre-loop comment above)
+            # Lake values must be updated before adjacent ditch values.
             if self.ditch_boundary == 'Cauchy':
-                for i in range(self.rows):
-                    for j in range(self.cols):
-                        if self.lake_h[i,j] < -eps and np.isfinite(self.cmask[i,j]):
-                            nbr = []
-                            if i > 0 and self.lake_h[i-1,j] > -eps and np.isfinite(self.cmask[i-1,j]):
-                                nbr.append(self.Tr1[i-1,j])
-                            if i < self.rows-1 and self.lake_h[i+1,j] > -eps and np.isfinite(self.cmask[i+1,j]):
-                                nbr.append(self.Tr1[i+1,j])
-                            if j > 0 and self.lake_h[i,j-1] > -eps and np.isfinite(self.cmask[i,j-1]):
-                                nbr.append(self.Tr1[i,j-1])
-                            if j < self.cols-1 and self.lake_h[i,j+1] > -eps and np.isfinite(self.cmask[i,j+1]):
-                                nbr.append(self.Tr1[i,j+1])
-                            if nbr:
-                                self.Tr1[i,j] = np.mean(nbr)
-
-            # Keep the substep's treatment while updating transmissivity values.
-            if self.ditch_boundary == 'Cauchy':
-                for i in range(self.rows):
-                    for j in range(self.cols):
-                        if ditch_neighbour_tr[i,j]:
-                            nbr = []
-                            if i > 0 and self.ditch_h[i-1,j] > -eps and np.isfinite(self.cmask[i-1,j]):
-                                nbr.append(self.Tr1[i-1,j])
-                            if i < self.rows-1 and self.ditch_h[i+1,j] > -eps and np.isfinite(self.cmask[i+1,j]):
-                                nbr.append(self.Tr1[i+1,j])
-                            if j > 0 and self.ditch_h[i,j-1] > -eps and np.isfinite(self.cmask[i,j-1]):
-                                nbr.append(self.Tr1[i,j-1])
-                            if j < self.cols-1 and self.ditch_h[i,j+1] > -eps and np.isfinite(self.cmask[i,j+1]):
-                                nbr.append(self.Tr1[i,j+1])
-                            if nbr:
-                                self.Tr1[i,j] = np.mean(nbr)
+                self._apply_neighbour_transmissivity(self.Tr1, self._lake_tr_neighbours)
+                self._apply_neighbour_transmissivity(self.Tr1, active_ditch_neighbours)
             
             TrTmpEW, TrTmpNS = self._interface_transmissivity(self.Tr1)
             self.TrW1[:,1:] = TrTmpEW
@@ -923,7 +895,7 @@ class SoilGrid_2Dflow(object):
                       ' max_index:', max_index, ' self.ditch_h[max_index]', self.ditch_h[max_index],
                       ' H[max_index]', Htmp[max_index]-self.ele[max_index])
 
-            if conv1 < crit:
+            if it + 1 >= min_iter and conv1 < crit:
                 converged = True
                 break
             if it + 1 >= max_iter:

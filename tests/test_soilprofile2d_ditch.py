@@ -3,6 +3,7 @@ from unittest import mock
 
 import numpy as np
 
+import soilprofile2D
 from soilprofile2D import SoilGrid_2Dflow
 
 
@@ -22,9 +23,11 @@ def rootmoist(gwl):
     return 0.3 + 0.001 * np.asarray(gwl)
 
 
-def make_model(gwl, elevation, streams, lakes=None, cellwise=False):
+def make_model(gwl, elevation, streams, lakes=None, cellwise=False, deep_id=None):
     shape = gwl.shape
     soiltype = np.full(shape, 'soil', dtype=object)
+    if deep_id is not None:
+        soiltype[~np.isfinite(deep_id)] = np.nan
     if cellwise:
         def lookup(function):
             return np.full(shape, function, dtype=object)
@@ -34,7 +37,7 @@ def make_model(gwl, elevation, streams, lakes=None, cellwise=False):
 
     return SoilGrid_2Dflow({
         'soiltype': soiltype,
-        'deep_id': np.ones(shape),
+        'deep_id': np.ones(shape) if deep_id is None else deep_id.copy(),
         'elevation': elevation.copy(),
         'streams': streams.copy(),
         'lakes': np.zeros(shape) if lakes is None else lakes.copy(),
@@ -53,6 +56,33 @@ def make_model(gwl, elevation, streams, lakes=None, cellwise=False):
 
 
 class CauchyDitchTransmissivityTest(unittest.TestCase):
+    def test_minimum_five_iterations_during_and_after_spinup(self):
+        shape = (3, 3)
+        model = make_model(np.full(shape, -0.5), np.full(shape, 245.81), np.zeros(shape))
+        model.spinup_steps = 1
+        with mock.patch.object(soilprofile2D.linalg, 'spsolve',
+                               wraps=soilprofile2D.linalg.spsolve) as solve:
+            for _ in range(2):
+                solve.reset_mock()
+                model.run_timestep(1.0, np.zeros(shape), np.zeros(shape))
+                self.assertEqual(solve.call_count, 5)
+        self.assertEqual(model.conv99, 99)
+
+    def test_five_iterations_do_not_override_convergence_or_budget(self):
+        shape = (3, 3)
+        model = make_model(np.full(shape, -0.5), np.full(shape, 245.81), np.zeros(shape))
+        with mock.patch.object(soilprofile2D.linalg, 'spsolve',
+                               wraps=soilprofile2D.linalg.spsolve) as solve:
+            converged, _ = model._solve_step(
+                1.0, np.zeros(shape), np.zeros(shape), 0.0, 5)
+        self.assertFalse(converged)
+        self.assertEqual(solve.call_count, 5)
+        with self.assertRaisesRegex(ValueError, 'at least 5'):
+            model._solve_step(1.0, np.zeros(shape), np.zeros(shape), 1e-3, 4)
+        model.maxiter = 4
+        with self.assertRaisesRegex(ValueError, 'at least 5'):
+            model._solve_step(1.0, np.zeros(shape), np.zeros(shape), 1e-3, 5)
+
     def test_floor_uses_cell_transmissivity_and_conserves_water(self):
         elevation = np.full((3, 3), 245.81)
         elevation[1, 0] = 258.42
@@ -92,7 +122,7 @@ class CauchyDitchTransmissivityTest(unittest.TestCase):
                 model._solve_step(0.001, np.zeros((3, 3)), np.zeros((3, 3)), 1e-3, 50)
 
                 self.assertAlmostEqual(model.Tr0[1, 1], transmissivity(center_gwl))
-                self.assertAlmostEqual(model.Tr1[1, 1], transmissivity(center_gwl))
+                self.assertAlmostEqual(model.Tr1[1, 1], transmissivity(model.gwl[1, 1]), places=5)
 
     def test_active_ditch_keeps_neighbour_mean_and_drains(self):
         elevation = np.full((3, 3), 245.81)
@@ -197,6 +227,33 @@ class CauchyDitchTransmissivityTest(unittest.TestCase):
         self.assertAlmostEqual(model.Tr1[1, 1], np.mean([
             model.Tr1[0, 1], model.Tr1[2, 1], model.Tr1[1, 0], model.Tr1[1, 2]
         ]))
+
+    def test_boundary_means_use_current_values_and_eligible_neighbours(self):
+        shape = (5, 5)
+        elevation = np.full(shape, 245.81)
+        gwl = np.full(shape, -0.1)
+        gwl[1, 1] = -1.0
+        streams = np.zeros(shape)
+        streams[1, 2] = streams[4, 4] = -0.333
+        lakes = np.zeros(shape)
+        lakes[1, 1] = -0.333
+        deep_id = np.ones(shape)
+        deep_id[0, 2] = deep_id[3, 4] = deep_id[4, 3] = np.nan
+        gwl[~np.isfinite(deep_id)] = np.nan
+        model = make_model(gwl, elevation, streams, lakes=lakes, deep_id=deep_id)
+
+        model._solve_step(0.001, np.zeros(shape), np.zeros(shape), 1e-3, 50)
+
+        for tr in (model.Tr0, model.Tr1):
+            with self.subTest(array=tr is model.Tr0):
+                self.assertAlmostEqual(tr[1, 1], np.mean([
+                    tr[0, 1], tr[2, 1], tr[1, 0], transmissivity(-0.1)
+                ]), places=3)
+                self.assertAlmostEqual(tr[1, 2], np.mean([
+                    tr[2, 2], tr[1, 1], tr[1, 3]
+                ]))
+        self.assertAlmostEqual(model.Tr0[4, 4], transmissivity(-0.1))
+        self.assertAlmostEqual(model.Tr1[4, 4], transmissivity(model.gwl[4, 4]), places=3)
 
 
 if __name__ == '__main__':
