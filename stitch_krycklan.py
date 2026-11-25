@@ -31,8 +31,8 @@ def parse_args():
         '--run-dir', type=Path,
         help='Directory containing the <streams>_<resolution>m input directories.',
     )
-    parser.add_argument('--start-date', type=parse_date, default=date(2015, 4, 1))
-    parser.add_argument('--end-date', type=parse_date, default=date(2015, 9, 1))
+    parser.add_argument('--start-date', type=parse_date, default=date(2014, 9, 1))
+    parser.add_argument('--end-date', type=parse_date, default=date(2015, 8, 31))
     args = parser.parse_args()
     if args.array_task_id is not None:
         if args.streams is not None:
